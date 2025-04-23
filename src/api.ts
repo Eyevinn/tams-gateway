@@ -66,4 +66,4 @@ export default (opts: ApiOptions) => {
   // register other API routes here
 
   return api;
-}
+};

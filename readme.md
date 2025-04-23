@@ -63,10 +63,10 @@ We are independent in a way that we are not commercially tied to any platform or
 With Eyevinn Open Source Cloud we enable to build solutions and applications based on Open Web Services and avoid being locked in with a single web service vendor. Our open-source solutions offer full flexibility with a revenue share model that supports the creators.
 
 Read our blogs and articles here:
+
 - [Developer blogs](https://dev.to/video)
 - [Medium](https://eyevinntechnology.medium.com)
 - [OSC](https://www.osaas.io)
 - [LinkedIn](https://www.linkedin.com/company/eyevinn/)
 
 Want to know more about Eyevinn, contact us at info@eyevinn.se!
-
