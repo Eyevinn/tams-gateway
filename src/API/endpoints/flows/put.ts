@@ -1,41 +1,18 @@
 import { Static, Type } from '@sinclair/typebox';
-import { FastifyError, FastifyPluginCallback } from 'fastify';
-import Logger from '../../../utils/Logger';
+import { FastifyPluginCallback } from 'fastify';
 import { flowsClient } from '../../../DB/client';
+import { DBFlow, Flow } from '../../../DB/schemas/Flow';
+import Logger from '../../../utils/Logger';
 
 const opts = {
   schema: {
     description: 'Create or update flow',
-    body: {
-      type: 'object',
-      required: ['id', 'source_id'],
-      properties: {
-        id: { type: 'string' },
-        source_id: { type: 'string' }
-      }
-    },
+    body: Flow,
     response: {
-      200: {
-        description: 'Successful response',
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          source_id: { type: 'string' }
-        }
-      }
+      200: Flow
     }
   }
 };
-
-const putFlowBodyReq = Type.Object({
-  id: Type.String(),
-  source_id: Type.String()
-});
-
-const putFlowBodyReply = Type.Object({
-  id: Type.String(),
-  source_id: Type.String()
-});
 
 const putFlowErrorBody = Type.Object({
   code: Type.Number(),
@@ -49,33 +26,33 @@ const putFlowParams = Type.Object({
 
 const putFlow: FastifyPluginCallback = (fastify, _, next) => {
   fastify.put<{
-    Body: Static<typeof putFlowBodyReq>;
-    Reply: Static<typeof putFlowBodyReply | typeof putFlowErrorBody>;
+    Body: Static<typeof Flow>;
+    Reply: Static<typeof Flow | typeof putFlowErrorBody>;
     Params: Static<typeof putFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
     const { id } = request.params;
-    const { source_id } = request.body;
+    const bodyFlow: Static<typeof Flow> = request.body;
 
-    let flow = {};
+    let flow: Partial<typeof DBFlow> = {};
     try {
       flow = await flowsClient.get(id);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       if (e.statusCode !== 404) {
+        Logger.red(JSON.stringify(e));
         throw e;
       }
     }
 
-    const updatedFlow = {
+    const updatedFlow: Static<typeof DBFlow> = {
       ...flow,
-      _id: id,
-      id,
-      source_id
+      ...bodyFlow,
+      _id: id
     };
 
     await flowsClient.insert(updatedFlow);
 
-    reply.code(200).send({ id, source_id });
+    reply.code(200).send(updatedFlow);
   });
   next();
 };
