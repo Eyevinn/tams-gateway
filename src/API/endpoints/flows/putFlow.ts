@@ -3,6 +3,7 @@ import { FastifyPluginCallback } from 'fastify';
 import { flowsClient } from '../../../DB/client';
 import { DBFlow, Flow } from '../../../DB/schemas/Flow';
 import Logger from '../../../utils/Logger';
+import ErrorResponse from '../../utils/error-response';
 
 const opts = {
   schema: {
@@ -14,21 +15,20 @@ const opts = {
   }
 };
 
-const putFlowErrorBody = Type.Object({
-  code: Type.Number(),
-  message: Type.String(),
-  id: Type.String()
-});
+const PutFlowErrorBody = Type.Intersect([
+  ErrorResponse,
+  Type.Object({ id: Type.String() })
+]);
 
-const putFlowParams = Type.Object({
+const PutFlowParams = Type.Object({
   id: Type.String()
 });
 
 const putFlow: FastifyPluginCallback = (fastify, _, next) => {
   fastify.put<{
     Body: Static<typeof Flow>;
-    Reply: Static<typeof Flow | typeof putFlowErrorBody>;
-    Params: Static<typeof putFlowParams>;
+    Reply: Static<typeof Flow | typeof PutFlowErrorBody>;
+    Params: Static<typeof PutFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
     const { id } = request.params;
     const bodyFlow: Static<typeof Flow> = request.body;

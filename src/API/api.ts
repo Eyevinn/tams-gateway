@@ -5,7 +5,10 @@ import swaggerUI from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import healthcheck from './endpoints/healthcheck';
 import errorHandler from './utils/error-handler';
-import putFlow from './endpoints/flows/put';
+import putFlow from './endpoints/flows/putFlow';
+import listFlows from './endpoints/flows/listFlows';
+import getFlow from './endpoints/flows/getFlow';
+import deleteFlow from './endpoints/flows/deleteFlow';
 
 export interface ApiOptions {
   title: string;
@@ -33,6 +36,9 @@ export default (opts: ApiOptions) => {
 
   api.register(healthcheck, { title: opts.title });
   api.register(putFlow);
+  api.register(listFlows);
+  api.register(getFlow);
+  api.register(deleteFlow);
 
   return api;
 };
