@@ -18,6 +18,7 @@ const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
     '/',
     {
       schema: {
+        tags: ['Healthcheck'],
         description: 'Healthcheck',
         response: {
           200: HelloWorld

@@ -1,11 +1,12 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 import { flowsClient } from '../../../DB/client';
-import { Flow } from '../../../DB/schemas/Flow';
+import { Flow } from '../../../DB/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
 
 const opts = {
   schema: {
+    tags: ['Flows'],
     description: 'Delete flow'
   }
 };

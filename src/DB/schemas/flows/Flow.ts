@@ -1,9 +1,9 @@
 import { Type } from '@sinclair/typebox';
-import CollectionItem from './CollectionItem';
-import ContainerMapping from './ContainerMapping';
+import CollectionItem from '../common/CollectionItem';
+import ContainerMapping from '../common/ContainerMapping';
 import EssenceParameters from './EssenceParameters';
 import SegmentDuration from './SegmentDuration';
-import DBProperties from './DBProperties';
+import DBProperties from '../common/DBProperties';
 
 const Flow = Type.Object({
   id: Type.String(),

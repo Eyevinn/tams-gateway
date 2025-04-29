@@ -1,8 +1,8 @@
 import { Type } from '@sinclair/typebox';
-import AudioTrack from './AudioTrack';
-import IsobmffContainer from './Isobmff_container';
-import Mp2tsContainer from './Mp2tsContainer';
-import MxfContainer from './MxfContainer';
+import AudioTrack from '../flows/AudioTrack';
+import IsobmffContainer from '../flows/Isobmff_container';
+import Mp2tsContainer from '../flows/Mp2tsContainer';
+import MxfContainer from '../flows/MxfContainer';
 
 const ContainerMapping = Type.Object({
   track_index: Type.Optional(Type.String()),

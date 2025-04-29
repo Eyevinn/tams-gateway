@@ -9,6 +9,7 @@ import putFlow from './endpoints/flows/putFlow';
 import listFlows from './endpoints/flows/listFlows';
 import getFlow from './endpoints/flows/getFlow';
 import deleteFlow from './endpoints/flows/deleteFlow';
+import listSources from './endpoints/sources/listSources';
 
 export interface ApiOptions {
   title: string;
@@ -27,7 +28,20 @@ export default (opts: ApiOptions) => {
         title: opts.title,
         description: 'API for accessing your TAMS flows.',
         version: 'v1'
-      }
+      },
+      tags: [
+        {
+          name: 'Healthcheck'
+        },
+        {
+          name: 'Flows',
+          description: 'Get, edit and delete flows'
+        },
+        {
+          name: 'Sources',
+          description: 'Get Sources'
+        }
+      ]
     }
   });
   api.register(swaggerUI, {
@@ -39,6 +53,8 @@ export default (opts: ApiOptions) => {
   api.register(listFlows);
   api.register(getFlow);
   api.register(deleteFlow);
+
+  api.register(listSources);
 
   return api;
 };

@@ -1,12 +1,13 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import { flowsClient } from '../../../DB/client';
-import { DBFlow, Flow } from '../../../DB/schemas/Flow';
-import Logger from '../../../utils/Logger';
+import { flowsClient, sourcesClient } from '../../../DB/client';
+import { DBFlow, Flow } from '../../../DB/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
+import { DBSource } from '../../../DB/schemas/sources/Source';
 
 const opts = {
   schema: {
+    tags: ['Flows'],
     description: 'Create or update flow',
     body: Flow,
     response: {
@@ -39,7 +40,6 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       if (e.statusCode !== 404) {
-        Logger.red(JSON.stringify(e));
         throw e;
       }
     }
@@ -51,6 +51,23 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     };
 
     await flowsClient.insert(updatedFlow);
+
+    let source: Partial<typeof DBSource> = {};
+    try {
+      source = await sourcesClient.get(bodyFlow.source_id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      if (e.statusCode !== 404) {
+        throw e;
+      }
+    }
+    const updatedSource: Static<typeof DBSource> = {
+      ...source,
+      id: bodyFlow.source_id,
+      _id: bodyFlow.source_id,
+      format: bodyFlow.format
+    };
+    await sourcesClient.insert(updatedSource);
 
     reply.code(200).send(updatedFlow);
   });

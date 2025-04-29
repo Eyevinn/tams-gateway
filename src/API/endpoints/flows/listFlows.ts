@@ -1,13 +1,14 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 import { flowsClient } from '../../../DB/client';
-import { Flow } from '../../../DB/schemas/Flow';
+import { Flow } from '../../../DB/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
 
 const Flows = Type.Array(Flow);
 
 const opts = {
   schema: {
+    tags: ['Flows'],
     description: 'List flows',
     response: {
       200: Flows
