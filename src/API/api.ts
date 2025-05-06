@@ -10,6 +10,9 @@ import listFlows from './endpoints/flows/listFlows';
 import getFlow from './endpoints/flows/getFlow';
 import deleteFlow from './endpoints/flows/deleteFlow';
 import listSources from './endpoints/sources/listSources';
+import postStorage from './endpoints/storage/postStorage';
+import postSegments from './endpoints/segments/postSegments';
+import listSegments from './endpoints/segments/listSegments';
 
 export interface ApiOptions {
   title: string;
@@ -40,6 +43,10 @@ export default (opts: ApiOptions) => {
         {
           name: 'Sources',
           description: 'Get Sources'
+        },
+        {
+          name: 'Storage & Segments',
+          description: 'Create storage and get/post segments'
         }
       ]
     }
@@ -55,6 +62,10 @@ export default (opts: ApiOptions) => {
   api.register(deleteFlow);
 
   api.register(listSources);
+
+  api.register(postStorage);
+  api.register(postSegments);
+  api.register(listSegments);
 
   return api;
 };
