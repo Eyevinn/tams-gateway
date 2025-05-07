@@ -13,6 +13,7 @@ import listSources from './endpoints/sources/listSources';
 import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
+import getS3URL from './endpoints/getS3URL';
 
 export interface ApiOptions {
   title: string;
@@ -66,6 +67,7 @@ export default (opts: ApiOptions) => {
   api.register(postStorage);
   api.register(postSegments);
   api.register(listSegments);
+  api.register(getS3URL);
 
   return api;
 };

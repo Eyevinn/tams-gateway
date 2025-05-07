@@ -10,7 +10,7 @@ export type S3Methods = 'GET' | 'PUT' | 'POST' | 'DELETE';
 export const createBucketBody =
   '<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\n<LocationConstraint>default</LocationConstraint>\n</CreateBucketConfiguration >';
 
-const createS3URL = async (method: S3Methods, bucketName: string) => {
+const createS3URL = async (method: S3Methods, bucketName?: string) => {
   const url = parseUrl(
     `https://eyevinnlab-tamspocstorage.minio-minio.auto.prod.osaas.io/${bucketName}`
   );
