@@ -2,7 +2,7 @@ ARG NODE_IMAGE=node:18-alpine
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
-EXPOSE 8000
+EXPOSE 8080
 RUN mkdir /app
 RUN chown node:node /app
 USER node
