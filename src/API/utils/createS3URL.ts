@@ -12,7 +12,7 @@ export const createBucketBody =
 
 // Create signed AWS URLs to PUT / GET Segments from the S3 Storage
 const createS3URL = async (method: S3Methods, bucketName?: string) => {
-  const url = parseUrl(`${process.env.S3_URL}/${bucketName}`);
+  const url = parseUrl(`${process.env.S3_ENDPOINT_URL}/${bucketName}`);
 
   const presigner = new S3RequestPresigner({
     credentials: fromEnv(),

@@ -30,7 +30,7 @@ Create an .env file based on the .env.sample file in the root of the project. Ad
 DB_URL=<DB_URL>
 DB_USERNAME=<DB_URL>
 DB_PASSWORD=<DB_PASSWORD>
-S3_URL=<S3_URL>
+S3_ENDPOINT_URL=<S3_ENDPOINT_URL>
 AWS_ACCESS_KEY_ID=<ACCESS_KEY_ID>
 AWS_SECRET_ACCESS_KEY=<SECRET_ACCESS_KEY>
 ```
@@ -41,7 +41,7 @@ If you are using the couchDB and Minio services from OSC then this file will loo
 DB_URL=<LINK TO OSC COUCHDB SERVICE>
 DB_USERNAME=admin
 DB_PASSWORD=<AdminPassword>
-S3_URL=<LINK TO OSC MINIO SERVICES>
+S3_ENDPOINT_URL=<LINK TO OSC MINIO SERVICES>
 AWS_ACCESS_KEY_ID=<RootUSer> //Set when creating OSC Minio Service
 AWS_SECRET_ACCESS_KEY=<RootPassword> //Set when creating OSC Minio Service
 ```
@@ -63,6 +63,11 @@ yarn dev
 ```
 
 The API is then running on https://localhost:8000
+
+## Additional Resources
+
+[BBC TAMS REPO](https://github.com/bbc/tams/blob/main/api/TimeAddressableMediaStore.yaml)  
+[BBC TAMS API DOCS](https://bbc.github.io/tams/main/index.html#/)
 
 ## Contributing
 
