@@ -10,10 +10,10 @@ export type S3Methods = 'GET' | 'PUT' | 'POST' | 'DELETE';
 export const createBucketBody =
   '<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\n<LocationConstraint>default</LocationConstraint>\n</CreateBucketConfiguration >';
 
+// Create signed AWS URLs to PUT / GET Segments from the S3 Storage
 const createS3URL = async (method: S3Methods, bucketName?: string) => {
-  const url = parseUrl(
-    `https://eyevinnlab-tamspocstorage.minio-minio.auto.prod.osaas.io/${bucketName}`
-  );
+  const url = parseUrl(`${process.env.S3_URL}/${bucketName}`);
+
   const presigner = new S3RequestPresigner({
     credentials: fromEnv(),
     region: 'eu-north-1',

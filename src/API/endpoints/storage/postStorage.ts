@@ -33,6 +33,7 @@ const opts = {
   }
 };
 
+// Create signed AWS URLs to create buckets and PUT Segments to the S3 Storage
 const postStorage: FastifyPluginCallback = (fastify, _, next) => {
   fastify.post<{
     Body: Static<typeof PostStorageBody>;
@@ -40,6 +41,8 @@ const postStorage: FastifyPluginCallback = (fastify, _, next) => {
     Params: Static<typeof PostStorageParams>;
   }>('/flows/:id/storage', opts, async (_, reply) => {
     const bucket_id = 'tams-' + uuidv4();
+
+    // TODO: Create several buckets (based on the limit of segments?)
     const pre = [
       {
         action: 'create_bucket',
@@ -51,6 +54,7 @@ const postStorage: FastifyPluginCallback = (fastify, _, next) => {
       }
     ];
 
+    // Number of segments per bucket
     const numberOfMediaObjects = 6;
     const media_objects = [];
     for (let i = 0; i < numberOfMediaObjects; i++) {

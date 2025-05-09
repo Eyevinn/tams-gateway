@@ -44,6 +44,7 @@ const getStartEndTimeInSeconds = (timerange: string) => {
   ];
 };
 
+// Fetch segments and filter based on timerange
 const listSegments: FastifyPluginCallback = (fastify, _, next) => {
   fastify.get<{
     Reply: Static<typeof SegmentsArray | typeof ErrorResponse>;

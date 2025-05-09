@@ -25,6 +25,7 @@ const PutFlowParams = Type.Object({
   id: Type.String()
 });
 
+// Create/update flow, create source and segments if they don't exist in DB
 const putFlow: FastifyPluginCallback = (fastify, _, next) => {
   fastify.put<{
     Body: Static<typeof Flow>;
@@ -50,6 +51,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       _id: id
     };
 
+    // Create or update flow
     await flowsClient.insert(updatedFlow);
 
     let source: Partial<typeof DBSource> = {};
@@ -67,6 +69,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       _id: bodyFlow.source_id,
       format: bodyFlow.format
     };
+    // Create of update source
     await sourcesClient.insert(updatedSource);
 
     try {
@@ -76,6 +79,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       if (e.statusCode !== 404) {
         throw e;
       }
+      // Create segments
       segmentsClient.insert({
         _id: bodyFlow.id,
         segments: []

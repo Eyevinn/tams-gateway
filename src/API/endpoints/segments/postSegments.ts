@@ -28,6 +28,7 @@ const opts = {
   }
 };
 
+// Store segment data to database
 const postSegments: FastifyPluginCallback = (fastify, _, next) => {
   fastify.post<{
     Body: Static<typeof PostSegmentsBody>;

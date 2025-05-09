@@ -1,41 +1,68 @@
 <h1 align="center">
-  Project Name or Logo
+  TAMS Gateway
 </h1>
 
 <div align="center">
-  project name - quick salespitch why this is awesome. 
-  <br />
-  <br />
-  :book: <b><a href="https://eyevinn.github.io/{{repo-name}}/">Read the documentation (github pages)</a></b> :eyes:
-  <br />
+  The Time-addressable Media Store (TAMS) stores segmented media flows by combining a media store that holds the individual media flow segments with a service that provides a database index for these segments.
 </div>
 
-<div align="center">
-<br />
-
-[![npm](https://img.shields.io/npm/v/@eyevinn/{{repo-name}}?style=flat-square)](https://www.npmjs.com/package/@eyevinn/{{repo-name}})
-[![github release](https://img.shields.io/github/v/release/Eyevinn/{{repo-name}}?style=flat-square)](https://github.com/Eyevinn/{{repo-name}}/releases)
-[![license](https://img.shields.io/github/license/eyevinn/{{repo-name}}.svg?style=flat-square)](LICENSE)
-
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-ff69b4.svg?style=flat-square)](https://github.com/eyevinn/{{repo-name}}/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
-[![made with hearth by Eyevinn](https://img.shields.io/badge/made%20with%20%E2%99%A5%20by-Eyevinn-59cbe8.svg?style=flat-square)](https://github.com/eyevinn)
-[![Slack](http://slack.streamingtech.se/badge.svg)](http://slack.streamingtech.se)
-
-</div>
-
-<!-- Add a description of the project here -->
+<p align="center">
+  <img src="./src/assets/flow.png" width="350" title="Flow">
+</p>
 
 ## Requirements
 
-<!--Add any external project dependencies such as node.js version etc here -->
+Node.js >= 18.15.0 ( LTS )  
+A couchDB database (https://app.osaas.io/dashboard/service/apache-couchdb)  
+An S3 Storage (https://app.osaas.io/dashboard/service/minio-minio)
 
 ## Installation / Usage
 
-<!--Add clear instructions on how to use the project here -->
+Install dependencies
+
+```
+yarn
+```
+
+Create an .env file based on the .env.sample file in the root of the project. Add to it:
+
+```
+DB_URL=<DB_URL>
+DB_USERNAME=<DB_URL>
+DB_PASSWORD=<DB_PASSWORD>
+S3_URL=<S3_URL>
+AWS_ACCESS_KEY_ID=<ACCESS_KEY_ID>
+AWS_SECRET_ACCESS_KEY=<SECRET_ACCESS_KEY>
+```
+
+If you are using the couchDB and Minio services from OSC then this file will look like:
+
+```
+DB_URL=<LINK TO OSC COUCHDB SERVICE>
+DB_USERNAME=admin
+DB_PASSWORD=<AdminPassword>
+S3_URL=<LINK TO OSC MINIO SERVICES>
+AWS_ACCESS_KEY_ID=<RootUSer> //Set when creating OSC Minio Service
+AWS_SECRET_ACCESS_KEY=<RootPassword> //Set when creating OSC Minio Service
+```
+
+To start TAMS-Gateway
+
+```
+yarn start
+```
+
+The API is then running on https://localhost:8000
 
 ## Development
 
-<!--Add clear instructions on how to start development of the project here -->
+To start TAMS-Gateway in development mode
+
+```
+yarn dev
+```
+
+The API is then running on https://localhost:8000
 
 ## Contributing
 

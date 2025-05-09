@@ -9,7 +9,7 @@
     "pretty": "prettier --check --ignore-unknown .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "nodemon",
-    "start": "ts-node -T src/server.ts"
+    "start": "ts-node -r dotenv/config -T src/main.ts"
   },
   "license": "MIT",
   "engines": {
@@ -27,6 +27,7 @@
     "@smithy/hash-node": "^4.0.2",
     "@smithy/protocol-http": "^5.1.0",
     "@smithy/url-parser": "^4.0.2",
+    "dotenv": "^16.5.0",
     "fastify": "5.3.2",
     "nano": "^10.1.4",
     "nodemon": "^2.0.20",
