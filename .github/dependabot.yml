@@ -8,6 +8,11 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # ESLint 10 (flat-config majors) needs a deliberate migration; pin to v9
+      # until we take it on, so it doesn't block the dev-dependencies group.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
