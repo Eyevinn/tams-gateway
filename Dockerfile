@@ -2,6 +2,9 @@ ARG NODE_IMAGE=node:20-alpine
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
+# Default port; the app reads PORT, so this matches the exposed port. OSC can
+# override PORT at runtime.
+ENV PORT=8080
 RUN corepack enable
 EXPOSE 8080
 RUN mkdir /app

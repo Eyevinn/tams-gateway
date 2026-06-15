@@ -4,6 +4,7 @@ import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import healthcheck from './endpoints/healthcheck';
+import readiness from './endpoints/readiness';
 import errorHandler from './utils/error-handler';
 import putFlow from './endpoints/flows/putFlow';
 import listFlows from './endpoints/flows/listFlows';
@@ -20,10 +21,19 @@ export interface ApiOptions {
 
 export default (opts: ApiOptions) => {
   const api = fastify({
-    ignoreTrailingSlash: true
+    routerOptions: { ignoreTrailingSlash: true },
+    // Structured request logging in all environments except tests.
+    logger:
+      process.env.NODE_ENV === 'test'
+        ? false
+        : { level: process.env.LOG_LEVEL || 'info' }
   }).withTypeProvider<TypeBoxTypeProvider>();
 
-  api.register(cors);
+  // Restrict CORS to configured origins (comma-separated) when set.
+  const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+    : true;
+  api.register(cors, { origin: corsOrigin });
   api.setErrorHandler(errorHandler);
   api.register(swagger, {
     swagger: {
@@ -56,6 +66,7 @@ export default (opts: ApiOptions) => {
   });
 
   api.register(healthcheck, { title: opts.title });
+  api.register(readiness);
   api.register(putFlow);
   api.register(listFlows);
   api.register(getFlow);

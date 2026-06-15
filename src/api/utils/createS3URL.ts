@@ -16,7 +16,7 @@ const createS3URL = async (method: S3Methods, bucketName?: string) => {
 
   const presigner = new S3RequestPresigner({
     credentials: fromEnv(),
-    region: 'eu-north-1',
+    region: process.env.AWS_REGION || 'eu-north-1',
     sha256: Hash.bind(null, 'sha256')
   });
 

@@ -35,19 +35,35 @@ const createDbIfMissing = async (name: string) => {
   }
 };
 
-// Idempotently ensure databases and indexes exist. Run once at startup so the
-// gateway works against a fresh CouchDB and stays stateless.
-export const initDatabases = async () => {
-  await createDbIfMissing('flows');
-  await createDbIfMissing('sources');
-  await createDbIfMissing('segments');
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  await segmentsClient.createIndex({
-    index: { fields: ['flow_id', 'ts_start'] },
-    ddoc: SEGMENTS_INDEX.ddoc,
-    name: SEGMENTS_INDEX.name,
-    type: 'json'
-  });
+// Idempotently ensure databases and indexes exist. Run once at startup so the
+// gateway works against a fresh CouchDB and stays stateless. Retries with a
+// fixed backoff so the gateway tolerates CouchDB coming up after it does.
+export const initDatabases = async (retries = 5, delayMs = 2000) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await createDbIfMissing('flows');
+      await createDbIfMissing('sources');
+      await createDbIfMissing('segments');
+
+      await segmentsClient.createIndex({
+        index: { fields: ['flow_id', 'ts_start'] },
+        ddoc: SEGMENTS_INDEX.ddoc,
+        name: SEGMENTS_INDEX.name,
+        type: 'json'
+      });
+      return;
+    } catch (e) {
+      if (attempt >= retries) {
+        throw e;
+      }
+      Logger.black(
+        `Database init failed (attempt ${attempt}/${retries}), retrying in ${delayMs}ms`
+      );
+      await sleep(delayMs);
+    }
+  }
 };
 
 export { client, flowsClient, sourcesClient, segmentsClient };
