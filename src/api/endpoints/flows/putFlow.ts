@@ -11,7 +11,8 @@ const opts = {
     description: 'Create or update flow',
     body: Flow,
     response: {
-      200: Flow
+      200: Flow,
+      201: Flow
     }
   }
 };
@@ -36,6 +37,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     const bodyFlow: Static<typeof Flow> = request.body;
 
     let flow: Partial<typeof DBFlow> = {};
+    let exists = true;
     try {
       flow = await flowsClient.get(id);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +45,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       if (e.statusCode !== 404) {
         throw e;
       }
+      exists = false;
     }
 
     const updatedFlow: Static<typeof DBFlow> = {
@@ -74,7 +77,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
 
     // Segments are stored as individual documents created via
     // POST /flows/:id/segments, so nothing to pre-create here.
-    reply.code(200).send(updatedFlow);
+    reply.code(exists ? 200 : 201).send(updatedFlow);
   });
   next();
 };

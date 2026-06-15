@@ -9,7 +9,7 @@ const Sources = Type.Array(Source);
 const opts = {
   schema: {
     tags: ['Sources'],
-    description: 'List flows',
+    description: 'List sources',
     response: {
       200: Sources
     }
