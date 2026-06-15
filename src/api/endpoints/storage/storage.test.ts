@@ -40,7 +40,7 @@ describe('postStorage', () => {
       url: '/flows/flow-1/storage',
       payload: {}
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.media_objects).toHaveLength(1);
     expect(body.media_objects[0].object_id.startsWith('tams-bucket/')).toBe(
@@ -57,7 +57,7 @@ describe('postStorage', () => {
       url: '/flows/flow-1/storage',
       payload: { limit: 3, content_type: 'video/mp4' }
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.media_objects).toHaveLength(3);
     expect(body.media_objects[0].put_url['content-type']).toBe('video/mp4');

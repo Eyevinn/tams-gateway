@@ -16,9 +16,16 @@ import listSources from './endpoints/sources/listSources';
 import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
+import { DEFAULT_LOG_LEVEL } from '../config';
 
+// All runtime configuration the API needs is passed in by the caller (see
+// server.ts), so this builder reads no environment itself and is trivially
+// testable. The defaults keep it usable standalone (e.g. in tests).
 export interface ApiOptions {
   title: string;
+  corsOrigin?: string[] | boolean;
+  logLevel?: string;
+  apiToken?: string;
 }
 
 export default (opts: ApiOptions) => {
@@ -28,22 +35,18 @@ export default (opts: ApiOptions) => {
     logger:
       process.env.NODE_ENV === 'test'
         ? false
-        : { level: process.env.LOG_LEVEL || 'info' }
+        : { level: opts.logLevel ?? DEFAULT_LOG_LEVEL }
   }).withTypeProvider<TypeBoxTypeProvider>();
 
-  // Restrict CORS to configured origins (comma-separated) when set.
-  const corsOrigin = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-    : true;
-  api.register(cors, { origin: corsOrigin });
+  // Restrict CORS to the configured origins; default to reflecting any origin.
+  api.register(cors, { origin: opts.corsOrigin ?? true });
   api.setErrorHandler(errorHandler);
 
-  // Bearer-token authentication. Enabled when API_TOKEN is set; public paths
-  // (liveness, readiness, docs) and CORS preflight bypass it. Registering the
-  // hook on the root instance applies it to every route registered below.
-  const apiToken = process.env.API_TOKEN;
-  if (apiToken) {
-    api.addHook('onRequest', createAuthHook(apiToken));
+  // Bearer-token authentication. Enabled when a token is configured; public
+  // paths (liveness, readiness, docs) and CORS preflight bypass it. Registering
+  // the hook on the root instance applies it to every route registered below.
+  if (opts.apiToken) {
+    api.addHook('onRequest', createAuthHook(opts.apiToken));
   } else {
     Logger.black('Authentication disabled (API_TOKEN not set)');
   }

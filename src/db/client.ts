@@ -9,7 +9,6 @@ const url = new URL(process.env.DB_URL || 'http://localhost:8000');
 url.username = process.env.DB_USERNAME || '';
 url.password = process.env.DB_PASSWORD || '';
 const client = nano(url.toString());
-Logger.black('Database: ' + url.toString());
 const flowsClient: DocumentScope<Static<typeof DBFlow>> = client.use('flows');
 const sourcesClient: DocumentScope<Static<typeof DBSource>> =
   client.use('sources');
@@ -41,6 +40,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // gateway works against a fresh CouchDB and stays stateless. Retries with a
 // fixed backoff so the gateway tolerates CouchDB coming up after it does.
 export const initDatabases = async (retries = 5, delayMs = 2000) => {
+  Logger.black('Database: ' + url.toString());
   for (let attempt = 1; ; attempt++) {
     try {
       await createDbIfMissing('flows');

@@ -1,18 +1,30 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import ErrorResponse from '../../utils/error-response';
 import Segment from '../../../db/schemas/segments/Segment';
 import { segmentsClient } from '../../../db/client';
 import { segmentKeys } from '../../utils/timerange';
+import getOrUndefined from '../../../db/getOrUndefined';
 
-const PostSegmentsErrorBody = Type.Intersect([
-  ErrorResponse,
-  Type.Object({ id: Type.String() })
-]);
+// A single segment or an array of segments, per the TAMS spec.
+const PostSegmentsBody = Type.Union([Segment, Type.Array(Segment)]);
 
-const PostSegmentsBody = Segment;
+// Error object (TAMS `error.json`) describing why a segment failed to register.
+const SegmentError = Type.Object({
+  type: Type.String(),
+  summary: Type.String(),
+  time: Type.String()
+});
 
-const PostSegmentsReply = Segment;
+// 200 response body: the segments that could not be registered.
+const FailedSegments = Type.Object({
+  failed_segments: Type.Array(
+    Type.Object({
+      object_id: Type.String(),
+      timerange: Type.Optional(Type.String()),
+      error: Type.Optional(SegmentError)
+    })
+  )
+});
 
 const PostSegmentsParams = Type.Object({
   id: Type.String()
@@ -21,49 +33,69 @@ const PostSegmentsParams = Type.Object({
 const opts = {
   schema: {
     tags: ['Storage & Segments'],
-    description: 'Register a segment for a flow',
+    description: 'Register one segment or an array of segments for a flow',
     body: PostSegmentsBody,
     response: {
-      201: PostSegmentsReply
+      // Partial success: some segments failed to register. Full success is 201
+      // with no body (not declared here, as an empty body needs no schema).
+      200: FailedSegments
     }
   }
 };
 
-// Register a segment as its own CouchDB document. The deterministic _id makes
+// Register each segment as its own CouchDB document. The deterministic _id makes
 // re-posting the same segment idempotent (upsert) rather than appending.
+// Returns 201 when every segment is stored, or 200 with the list of failures
+// (continuing past failures, per the spec) when some could not be registered.
 const postSegments: FastifyPluginCallback = (fastify, _, next) => {
   fastify.post<{
     Body: Static<typeof PostSegmentsBody>;
-    Reply: Static<typeof PostSegmentsReply | typeof PostSegmentsErrorBody>;
+    Reply: Static<typeof FailedSegments> | undefined;
     Params: Static<typeof PostSegmentsParams>;
   }>('/flows/:id/segments', opts, async (request, reply) => {
     const { id } = request.params;
-    // get_urls are presigned on read, never stored (dropped from the body here).
-    const { get_urls: _getUrls, ...segment } = request.body;
-    const { tsStart, tsEnd } = segmentKeys(segment.timerange);
-    const _id = `${id}:${tsStart}:${segment.object_id}`;
+    const body = request.body;
+    const segments = Array.isArray(body) ? body : [body];
 
-    let _rev: string | undefined;
-    try {
-      const existing = await segmentsClient.get(_id);
-      _rev = existing._rev;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (e: any) {
-      if (e.statusCode !== 404) {
-        throw e;
+    const failed: Static<typeof FailedSegments>['failed_segments'] = [];
+
+    for (const entry of segments) {
+      // get_urls are presigned on read, never stored (dropped here).
+      const { get_urls: _getUrls, ...segment } = entry;
+      try {
+        const { tsStart, tsEnd } = segmentKeys(segment.timerange);
+        const _id = `${id}:${tsStart}:${segment.object_id}`;
+
+        // Reuse the existing revision so a re-post upserts rather than conflicts.
+        const existing = await getOrUndefined(segmentsClient, _id);
+        const _rev = existing?._rev;
+
+        await segmentsClient.insert({
+          ...segment,
+          _id,
+          ...(_rev ? { _rev } : {}),
+          flow_id: id,
+          ts_start: tsStart,
+          ts_end: tsEnd
+        });
+      } catch (err) {
+        failed.push({
+          object_id: segment.object_id,
+          timerange: segment.timerange,
+          error: {
+            type: 'RegistrationError',
+            summary: err instanceof Error ? err.message : String(err),
+            time: new Date().toISOString()
+          }
+        });
       }
     }
 
-    await segmentsClient.insert({
-      ...segment,
-      _id,
-      ...(_rev ? { _rev } : {}),
-      flow_id: id,
-      ts_start: tsStart,
-      ts_end: tsEnd
-    });
-
-    reply.code(201).send(segment);
+    if (failed.length > 0) {
+      reply.code(200).send({ failed_segments: failed });
+    } else {
+      reply.code(201).send(undefined);
+    }
   });
   next();
 };

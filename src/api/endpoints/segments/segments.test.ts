@@ -84,6 +84,51 @@ describe('postSegments', () => {
     expect(mockClient.insert).not.toHaveBeenCalled();
     await app.close();
   });
+
+  it('registers an array of segments and returns 201 with no body', async () => {
+    mockClient.get.mockRejectedValue({ statusCode: 404 });
+    mockClient.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: [
+        { object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' },
+        { object_id: 'bucket/obj-2', timerange: '[10:0_20:0)' }
+      ]
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body).toBe('');
+    expect(mockClient.insert).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
+  it('returns 200 with the failed segments on partial failure', async () => {
+    mockClient.get.mockRejectedValue({ statusCode: 404 });
+    // First insert fails, second succeeds.
+    mockClient.insert
+      .mockRejectedValueOnce(new Error('conflict'))
+      .mockResolvedValueOnce({ ok: true });
+
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: [
+        { object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' },
+        { object_id: 'bucket/obj-2', timerange: '[10:0_20:0)' }
+      ]
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.failed_segments).toHaveLength(1);
+    expect(body.failed_segments[0].object_id).toBe('bucket/obj-1');
+    expect(body.failed_segments[0].error.summary).toBe('conflict');
+    await app.close();
+  });
 });
 
 describe('listSegments', () => {
@@ -106,6 +151,18 @@ describe('listSegments', () => {
 
     const body = res.json();
     expect(body[0].get_urls[0].url).toBe('https://s3.example/signed');
+    await app.close();
+  });
+
+  it('rejects an unparseable timerange with 400', async () => {
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=%C2%84'
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(mockClient.find).not.toHaveBeenCalled();
     await app.close();
   });
 

@@ -4,16 +4,19 @@ import { Hash } from '@smithy/hash-node';
 import { fromEnv } from '@aws-sdk/credential-providers';
 import { HttpRequest } from '@smithy/protocol-http';
 import { formatUrl } from '@aws-sdk/util-format-url';
+import { DEFAULT_AWS_REGION } from '../../config';
 
 export type S3Methods = 'GET' | 'PUT' | 'POST' | 'DELETE';
 
-// Create signed AWS URLs to PUT / GET Segments from the S3 Storage
-const createS3URL = async (method: S3Methods, bucketName?: string) => {
-  const url = parseUrl(`${process.env.S3_ENDPOINT_URL}/${bucketName}`);
+// Create a presigned S3 URL for an object. `key` is the full object path
+// (`<bucket>/<key>`) appended to the endpoint, so the same value resolves to
+// both PUT (on allocation) and GET (when listing segments).
+const createS3URL = async (method: S3Methods, key?: string) => {
+  const url = parseUrl(`${process.env.S3_ENDPOINT_URL}/${key}`);
 
   const presigner = new S3RequestPresigner({
     credentials: fromEnv(),
-    region: process.env.AWS_REGION || 'eu-north-1',
+    region: process.env.AWS_REGION || DEFAULT_AWS_REGION,
     sha256: Hash.bind(null, 'sha256')
   });
 

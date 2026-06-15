@@ -64,7 +64,7 @@ const run = async () => {
   const storageRes = await api('POST', `/flows/${flowId}/storage`, {
     limit: 1
   });
-  check(storageRes.status === 200, `POST storage -> ${storageRes.status}`);
+  check(storageRes.status === 201, `POST storage -> ${storageRes.status}`);
   const storage = await storageRes.json();
   const object = storage.media_objects?.[0];
   check(!!object?.put_url?.url, 'storage returned a presigned PUT url');

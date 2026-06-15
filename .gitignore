@@ -3,3 +3,5 @@ node_modules/
 .env
 .claude
 docs
+# Derived by scripts/interop-coverage.ts (regenerated on each interop run)
+spec/.subset.json

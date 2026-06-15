@@ -27,7 +27,7 @@ const opts = {
     description: 'Allocate media object storage and return presigned PUT URLs',
     body: PostStorageBody,
     response: {
-      200: PostStorageReply
+      201: PostStorageReply
     }
   }
 };
@@ -61,7 +61,8 @@ const postStorage: FastifyPluginCallback = (fastify, _, next) => {
       });
     }
 
-    reply.code(200).send({ media_objects });
+    // Per the TAMS spec, allocated storage locations are returned with 201.
+    reply.code(201).send({ media_objects });
   });
   next();
 };

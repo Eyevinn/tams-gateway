@@ -1,0 +1,74 @@
+name: Interop
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast, no-services check: does the gateway's generated OpenAPI surface still
+  # cover the BBC TAMS operations we claim to implement? Fails on regressions.
+  coverage:
+    if: "!contains(github.event.pull_request.title, 'WIP!')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Coverage diff vs vendored BBC spec
+        run: pnpm run interop
+
+  # Deep check: run the implemented endpoints against the real BBC schemas with
+  # Schemathesis to verify a third-party TAMS client would interoperate.
+  #
+  # Allowed to fail for now: the gateway has known, documented deviations on
+  # some implemented endpoints (see docs/tams-spec-conformance.md). Treat the
+  # output as the actionable conformance backlog; remove continue-on-error once
+  # the P0 deviations are fixed so this becomes a hard gate.
+  conformance:
+    if: "!contains(github.event.pull_request.title, 'WIP!')"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      DB_URL: http://localhost:5984
+      DB_USERNAME: admin
+      DB_PASSWORD: password
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: tams
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: eu-north-1
+      AWS_DEFAULT_REGION: eu-north-1
+      API_TOKEN: interop-token
+      PORT: '8000'
+      BASE_URL: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start CouchDB
+        run: docker run -d --name couchdb -p 5984:5984 -e COUCHDB_USER=admin -e COUCHDB_PASSWORD=password couchdb:3
+      - name: Start MinIO
+        run: docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio server /data
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do curl -sf http://localhost:5984/ >/dev/null && break || sleep 2; done
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live >/dev/null && break || sleep 2; done
+      - name: Create bucket
+        run: aws --endpoint-url http://localhost:9000 s3 mb s3://tams
+      - name: Start gateway
+        run: |
+          pnpm start &
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/readiness >/dev/null && break || sleep 2; done
+      - name: Run Schemathesis conformance
+        run: pnpm run interop:conformance

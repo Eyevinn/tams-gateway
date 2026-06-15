@@ -6,6 +6,7 @@ import ErrorResponse from '../../utils/error-response';
 import Segment from '../../../db/schemas/segments/Segment';
 import createS3URL from '../../utils/createS3URL';
 import { overlapBounds } from '../../utils/timerange';
+import httpError from '../../utils/http-error';
 
 const SegmentsArray = Type.Array(Segment);
 
@@ -50,13 +51,19 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
 
     const selector: MangoSelector = { flow_id: id };
     if (timerange) {
-      const { startBelow, endAbove } = overlapBounds(timerange);
-      // Segment overlaps query when ts_start < queryEnd && ts_end > queryStart.
-      if (startBelow !== null) {
-        selector.ts_start = { $lt: startBelow };
+      let bounds: ReturnType<typeof overlapBounds>;
+      try {
+        bounds = overlapBounds(timerange);
+      } catch {
+        // An unparseable timerange is a client error, not a server error.
+        throw httpError(400, `Invalid timerange "${timerange}"`);
       }
-      if (endAbove !== null) {
-        selector.ts_end = { $gt: endAbove };
+      // Segment overlaps query when ts_start < queryEnd && ts_end > queryStart.
+      if (bounds.startBelow !== null) {
+        selector.ts_start = { $lt: bounds.startBelow };
+      }
+      if (bounds.endAbove !== null) {
+        selector.ts_end = { $gt: bounds.endAbove };
       }
     }
 
