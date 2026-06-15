@@ -11,7 +11,8 @@ const PostStorageErrorBody = Type.Intersect([
 ]);
 
 const PostStorageBody = Type.Object({
-  limit: Type.Optional(Type.Integer({ minimum: 1 })),
+  // The spec sets no minimum; allow 0 (request no objects) to stay compatible.
+  limit: Type.Optional(Type.Integer({ minimum: 0 })),
   content_type: Type.Optional(Type.String())
 });
 
