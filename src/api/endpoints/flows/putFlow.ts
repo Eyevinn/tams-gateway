@@ -5,15 +5,16 @@ import { DBFlow, Flow } from '../../../db/schemas/flows/Flow';
 import { DBSource } from '../../../db/schemas/sources/Source';
 import httpError from '../../utils/http-error';
 import getOrUndefined from '../../../db/getOrUndefined';
+import stripDbFields from '../../../db/stripDbFields';
 
 const opts = {
   schema: {
     tags: ['Flows'],
     description: 'Create or update flow',
-    body: Flow,
-    response: {
-      201: Flow
-    }
+    body: Flow
+    // No response schema: the created Flow is returned verbatim (minus _id/_rev)
+    // so it validates against flow.json. A narrow schema would drop
+    // format-specific essence_parameters (e.g. audio sample_rate/channels).
   }
 };
 
@@ -70,7 +71,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     if (exists) {
       reply.code(204).send(undefined);
     } else {
-      reply.code(201).send(updatedFlow);
+      reply.code(201).send(stripDbFields(updatedFlow));
     }
   });
   next();
