@@ -1,0 +1,117 @@
+// End-to-end smoke test exercising the full TAMS write -> read path against a
+// running gateway backed by a real CouchDB and S3/MinIO.
+//
+//   1. PUT  /flows/{id}            create a flow (and its source)
+//   2. POST /flows/{id}/storage    allocate a media object + presigned PUT URL
+//   3. PUT  <presigned url>        upload segment bytes to object storage
+//   4. POST /flows/{id}/segments   register the segment
+//   5. GET  /flows/{id}/segments   list by timerange, get a presigned GET URL
+//   6. GET  <presigned url>        download and verify the bytes round-trip
+//   7. DELETE /flows/{id}          clean up
+//
+// Env: BASE_URL (default http://localhost:8000), API_TOKEN (optional).
+
+import { randomUUID } from 'crypto';
+
+const BASE_URL = process.env.BASE_URL || 'http://localhost:8000';
+const TOKEN = process.env.API_TOKEN;
+const auth = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {};
+
+const flowId = randomUUID();
+const sourceId = randomUUID();
+const timerange = '[0:0_10:0)';
+const payload = `tams-segment-${randomUUID()}`;
+
+let failures = 0;
+const check = (cond, message) => {
+  if (cond) {
+    console.log(`  ok: ${message}`);
+  } else {
+    console.error(`  FAIL: ${message}`);
+    failures++;
+  }
+};
+
+const api = async (method, path, body) => {
+  // Only set a JSON content-type when there is a body; sending it on a
+  // bodyless request makes Fastify reject it with 400.
+  const headers = { ...auth };
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  return res;
+};
+
+const run = async () => {
+  console.log(`E2E against ${BASE_URL} (flow ${flowId})`);
+
+  // 1. Create flow
+  const putRes = await api('PUT', `/flows/${flowId}`, {
+    id: flowId,
+    source_id: sourceId,
+    format: 'urn:x-nmos:format:video',
+    codec: 'video/mp2t',
+    essence_parameters: { frame_width: 1920, frame_height: 1080 }
+  });
+  check([200, 201].includes(putRes.status), `PUT flow -> ${putRes.status}`);
+
+  // 2. Allocate storage
+  const storageRes = await api('POST', `/flows/${flowId}/storage`, {
+    limit: 1
+  });
+  check(storageRes.status === 200, `POST storage -> ${storageRes.status}`);
+  const storage = await storageRes.json();
+  const object = storage.media_objects?.[0];
+  check(!!object?.put_url?.url, 'storage returned a presigned PUT url');
+
+  // 3. Upload the segment bytes to object storage
+  const uploadRes = await fetch(object.put_url.url, {
+    method: 'PUT',
+    headers: { 'content-type': object.put_url['content-type'] },
+    body: payload
+  });
+  check(uploadRes.ok, `upload to storage -> ${uploadRes.status}`);
+
+  // 4. Register the segment
+  const segRes = await api('POST', `/flows/${flowId}/segments`, {
+    object_id: object.object_id,
+    timerange
+  });
+  check(segRes.status === 201, `POST segment -> ${segRes.status}`);
+
+  // 5. List segments by timerange
+  const listRes = await api(
+    'GET',
+    `/flows/${flowId}/segments?timerange=${encodeURIComponent(timerange)}`
+  );
+  check(listRes.status === 200, `GET segments -> ${listRes.status}`);
+  const segments = await listRes.json();
+  check(segments.length === 1, `listed ${segments.length} segment(s)`);
+  const getUrl = segments[0]?.get_urls?.[0]?.url;
+  check(!!getUrl, 'segment returned a presigned GET url');
+
+  // 6. Download and verify round-trip
+  const downloadRes = await fetch(getUrl);
+  const downloaded = await downloadRes.text();
+  check(downloaded === payload, 'downloaded bytes match uploaded bytes');
+
+  // 7. Clean up
+  const delRes = await api('DELETE', `/flows/${flowId}`);
+  check(delRes.status === 204, `DELETE flow -> ${delRes.status}`);
+
+  if (failures > 0) {
+    console.error(`\nE2E FAILED (${failures} check(s) failed)`);
+    process.exit(1);
+  }
+  console.log('\nE2E PASSED');
+};
+
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

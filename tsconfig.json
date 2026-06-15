@@ -16,5 +16,5 @@
     "resolveJsonModule": true /* Enable importing .json files. */,
     "moduleResolution": "bundler" /* Matches the bundler/transpiler runtime (tsx, vitest, esbuild). */
   },
-  "exclude": ["node_modules", "*.config.js"]
+  "exclude": ["node_modules", "*.config.js", "scripts"]
 }
