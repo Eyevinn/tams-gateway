@@ -9,7 +9,9 @@
     "pretty": "prettier --check --ignore-unknown .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx watch -r dotenv/config src/main.ts",
-    "start": "tsx -r dotenv/config src/main.ts"
+    "start": "tsx -r dotenv/config src/main.ts",
+    "interop": "tsx scripts/interop-coverage.ts",
+    "interop:conformance": "scripts/interop-conformance.sh"
   },
   "license": "MIT",
   "engines": {
@@ -44,6 +46,7 @@
     "husky": "^9.1.7",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3",
+    "yaml": "^2.7.1",
     "typescript-eslint": "8",
     "vitest": "^4.1.9"
   },

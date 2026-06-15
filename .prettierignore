@@ -1,1 +1,9 @@
 pnpm-lock.yaml
+
+# Vendored BBC TAMS spec — kept verbatim, never reformatted (see spec/README.md).
+spec/TimeAddressableMediaStore.yaml
+spec/schemas/
+spec/examples/
+# Derived / generated interop artifacts.
+spec/.subset.json
+spec/interop-baseline.json

@@ -1,0 +1,11 @@
+[
+  "DELETE /flows/{}",
+  "GET /",
+  "GET /flows",
+  "GET /flows/{}",
+  "GET /flows/{}/segments",
+  "GET /sources",
+  "POST /flows/{}/segments",
+  "POST /flows/{}/storage",
+  "PUT /flows/{}"
+]
