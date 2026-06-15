@@ -3,14 +3,15 @@ import { FastifyPluginCallback } from 'fastify';
 import { flowsClient } from '../../../db/client';
 import { Flow } from '../../../db/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
+import stripDbFields from '../../../db/stripDbFields';
 
 const opts = {
   schema: {
     tags: ['Flows'],
-    description: 'Get flow',
-    response: {
-      200: Flow
-    }
+    description: 'Get flow'
+    // No response schema: the stored Flow is returned verbatim (minus _id/_rev)
+    // so every spec field is preserved and the response validates against
+    // flow.json. A narrower schema would silently drop format-specific fields.
   }
 };
 
@@ -20,12 +21,12 @@ const GetFlowParams = Type.Object({
 
 const getFlow: FastifyPluginCallback = (fastify, _, next) => {
   fastify.get<{
-    Reply: Static<typeof Flow | typeof ErrorResponse>;
+    Reply: Static<typeof Flow> | Static<typeof ErrorResponse>;
     Params: Static<typeof GetFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
-    const DBFlow = await flowsClient.get(request.params.id);
+    const flow = await flowsClient.get(request.params.id);
 
-    reply.code(200).send(DBFlow);
+    reply.code(200).send(stripDbFields(flow));
   });
   next();
 };

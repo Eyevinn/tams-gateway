@@ -22,17 +22,13 @@ jobs:
       - name: Coverage diff vs vendored BBC spec
         run: pnpm run interop
 
-  # Deep check: run the implemented endpoints against the real BBC schemas with
-  # Schemathesis to verify a third-party TAMS client would interoperate.
-  #
-  # Allowed to fail for now: the gateway has known, documented deviations on
-  # some implemented endpoints (see docs/tams-spec-conformance.md). Treat the
-  # output as the actionable conformance backlog; remove continue-on-error once
-  # the P0 deviations are fixed so this becomes a hard gate.
+  # Deep check (hard gate): run the implemented endpoints against the real BBC
+  # schemas with Schemathesis to verify a third-party TAMS client would
+  # interoperate. Scoped to response conformance (schema/status/content-type) —
+  # see scripts/interop-conformance.sh for what is and is not gated.
   conformance:
     if: "!contains(github.event.pull_request.title, 'WIP!')"
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       DB_URL: http://localhost:5984
       DB_USERNAME: admin

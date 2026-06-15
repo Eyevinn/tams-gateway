@@ -4,8 +4,7 @@ import { MangoSelector } from 'nano';
 import { flowsClient } from '../../../db/client';
 import { Flow } from '../../../db/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
-
-const Flows = Type.Array(Flow);
+import stripDbFields from '../../../db/stripDbFields';
 
 // Interim cap for filtered queries until cursor pagination is added; the
 // unfiltered listing still returns every flow.
@@ -28,10 +27,9 @@ const opts = {
   schema: {
     tags: ['Flows'],
     description: 'List flows, optionally filtered by the spec query parameters',
-    querystring: ListFlowsQueries,
-    response: {
-      200: Flows
-    }
+    querystring: ListFlowsQueries
+    // No response schema: flows are returned verbatim (minus _id/_rev) so the
+    // response validates against flow.json without dropping spec fields.
   }
 };
 
@@ -72,23 +70,23 @@ const buildSelector = (
 
 const listFlows: FastifyPluginCallback = (fastify, _, next) => {
   fastify.get<{
-    Reply: Static<typeof Flows | typeof ErrorResponse>;
+    Reply: Static<typeof Flow>[] | Static<typeof ErrorResponse>;
     Querystring: Static<typeof ListFlowsQueries>;
   }>('/flows', opts, async (request, reply) => {
     const selector = buildSelector(request.query as Record<string, unknown>);
 
-    let flows: Static<typeof Flows>;
+    let docs: object[];
     if (selector) {
       const result = await flowsClient.find({ selector, limit: FIND_LIMIT });
-      flows = result.docs as unknown as Static<typeof Flows>;
+      docs = result.docs;
     } else {
       const DBFlows = await flowsClient.list({ include_docs: true });
-      flows = DBFlows.rows
-        .map((row) => row.doc)
-        .filter((doc) => !!doc) as Static<typeof Flows>;
+      docs = DBFlows.rows.map((row) => row.doc).filter((doc) => !!doc);
     }
 
-    reply.code(200).send(flows);
+    reply
+      .code(200)
+      .send(docs.map((doc) => stripDbFields(doc)) as Static<typeof Flow>[]);
   });
   next();
 };
