@@ -6,8 +6,9 @@ import UncParameters from './UncParameters';
 
 const EssenceParameters = Type.Object({
   frame_rate: Type.Optional(FrameRate),
-  frame_width: Type.Integer(),
-  frame_height: Type.Integer(),
+  // Frame dimensions only apply to video; audio/data flows omit them.
+  frame_width: Type.Optional(Type.Integer()),
+  frame_height: Type.Optional(Type.Integer()),
   bit_depth: Type.Optional(Type.Integer()),
   interlace_mode: Type.Optional(Type.String()),
   colorspace: Type.Optional(Type.String()),
