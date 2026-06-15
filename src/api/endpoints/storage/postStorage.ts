@@ -2,8 +2,6 @@ import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 import ErrorResponse from '../../utils/error-response';
 import { Storage } from '../../../db/schemas/storage/Storage';
-import Pre from '../../../db/schemas/storage/Pre';
-import { createBucketBody } from '../../utils/createS3URL';
 import { v4 as uuidv4 } from 'uuid';
 import createS3URL from '../../utils/createS3URL';
 
@@ -13,10 +11,11 @@ const PostStorageErrorBody = Type.Intersect([
 ]);
 
 const PostStorageBody = Type.Object({
-  limit: Type.Optional(Type.Integer())
+  limit: Type.Optional(Type.Integer({ minimum: 1 })),
+  content_type: Type.Optional(Type.String())
 });
 
-const PostStorageReply = Type.Intersect([Type.Object({ pre: Pre }), Storage]);
+const PostStorageReply = Storage;
 
 const PostStorageParams = Type.Object({
   id: Type.String()
@@ -25,54 +24,44 @@ const PostStorageParams = Type.Object({
 const opts = {
   schema: {
     tags: ['Storage & Segments'],
-    description: 'Create segment storage',
-    body: {},
+    description: 'Allocate media object storage and return presigned PUT URLs',
+    body: PostStorageBody,
     response: {
       200: PostStorageReply
     }
   }
 };
 
-// Create signed AWS URLs to create buckets and PUT Segments to the S3 Storage
+const DEFAULT_LIMIT = 1;
+const DEFAULT_CONTENT_TYPE = 'video/mp2t';
+
+// Allocate media objects in the pre-provisioned bucket (S3_BUCKET) and return
+// presigned PUT URLs. The bucket must already exist; the gateway never creates
+// buckets. object_id is `<bucket>/<key>` so the same value resolves to a GET
+// URL when segments are listed.
 const postStorage: FastifyPluginCallback = (fastify, _, next) => {
   fastify.post<{
     Body: Static<typeof PostStorageBody>;
     Reply: Static<typeof PostStorageReply | typeof PostStorageErrorBody>;
     Params: Static<typeof PostStorageParams>;
-  }>('/flows/:id/storage', opts, async (_, reply) => {
-    const bucket_id = 'tams-' + uuidv4();
+  }>('/flows/:id/storage', opts, async (request, reply) => {
+    const bucket = process.env.S3_BUCKET as string;
+    const limit = request.body.limit ?? DEFAULT_LIMIT;
+    const contentType = request.body.content_type ?? DEFAULT_CONTENT_TYPE;
 
-    // TODO: Create several buckets (based on the limit of segments?)
-    const pre = [
-      {
-        action: 'create_bucket',
-        bucket_id,
-        put_url: {
-          url: await createS3URL('PUT', bucket_id),
-          body: createBucketBody
-        }
-      }
-    ];
-
-    // Number of segments per bucket
-    const numberOfMediaObjects = 6;
     const media_objects = [];
-    for (let i = 0; i < numberOfMediaObjects; i++) {
-      const newObjectID = `${bucket_id}/${uuidv4()}`;
+    for (let i = 0; i < limit; i++) {
+      const object_id = `${bucket}/${uuidv4()}`;
       media_objects.push({
-        object_id: newObjectID,
+        object_id,
         put_url: {
-          url: await createS3URL('PUT', newObjectID),
-          'content-type': 'video/mp2t'
+          url: await createS3URL('PUT', object_id),
+          'content-type': contentType
         }
       });
     }
 
-    const returnObject: Static<typeof PostStorageReply> = {
-      pre,
-      media_objects
-    };
-    reply.code(200).send(returnObject);
+    reply.code(200).send({ media_objects });
   });
   next();
 };

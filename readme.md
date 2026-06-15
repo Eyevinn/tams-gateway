@@ -31,10 +31,14 @@ DB_URL=<DB_URL>
 DB_USERNAME=<DB_USERNAME>
 DB_PASSWORD=<DB_PASSWORD>
 S3_ENDPOINT_URL=<S3_ENDPOINT_URL>
+S3_BUCKET=<S3_BUCKET>
 AWS_ACCESS_KEY_ID=<ACCESS_KEY_ID>
 AWS_SECRET_ACCESS_KEY=<SECRET_ACCESS_KEY>
 API_TOKEN=<API_TOKEN>
 ```
+
+`S3_BUCKET` must already exist; the gateway allocates object keys within it and
+never creates buckets.
 
 Optional variables: `PORT` (default `8000`), `AWS_REGION` (default
 `eu-north-1`), `CORS_ORIGIN` (comma-separated allowlist), `LOG_LEVEL`.
