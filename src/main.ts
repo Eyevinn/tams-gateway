@@ -1,4 +1,7 @@
-import initServer from './API/server';
+import initServer from './api/server';
 
 // Start server
-initServer();
+initServer().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

@@ -1,8 +1,8 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 import ErrorResponse from '../../utils/error-response';
-import { Storage } from '../../../DB/schemas/storage/Storage';
-import Pre from '../../../DB/schemas/storage/Pre';
+import { Storage } from '../../../db/schemas/storage/Storage';
+import Pre from '../../../db/schemas/storage/Pre';
 import { createBucketBody } from '../../utils/createS3URL';
 import { v4 as uuidv4 } from 'uuid';
 import createS3URL from '../../utils/createS3URL';

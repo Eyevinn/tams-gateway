@@ -1,8 +1,8 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import { sourcesClient } from '../../../DB/client';
+import { sourcesClient } from '../../../db/client';
 import ErrorResponse from '../../utils/error-response';
-import { Source } from '../../../DB/schemas/sources/Source';
+import { Source } from '../../../db/schemas/sources/Source';
 
 const Sources = Type.Array(Source);
 

@@ -17,6 +17,8 @@
 
     /* Type Checking */
     "strict": true /* Enable all strict type-checking options. */,
+    "noUnusedLocals": true /* Report errors on unused local variables. */,
+    "noUnusedParameters": true /* Report errors on unused parameters. */,
 
     /* Completeness */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
