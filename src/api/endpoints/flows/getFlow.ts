@@ -1,31 +1,33 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import { flowsClient } from '../../../DB/client';
-import { Flow } from '../../../DB/schemas/flows/Flow';
+import { flowsClient } from '../../../db/client';
+import { Flow } from '../../../db/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
 
 const opts = {
   schema: {
     tags: ['Flows'],
-    description: 'Delete flow'
+    description: 'Get flow',
+    response: {
+      200: Flow
+    }
   }
 };
 
-const DeleteFlowParams = Type.Object({
+const GetFlowParams = Type.Object({
   id: Type.String()
 });
 
-const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
-  fastify.delete<{
+const getFlow: FastifyPluginCallback = (fastify, _, next) => {
+  fastify.get<{
     Reply: Static<typeof Flow | typeof ErrorResponse>;
-    Params: Static<typeof DeleteFlowParams>;
+    Params: Static<typeof GetFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
     const DBFlow = await flowsClient.get(request.params.id);
-    flowsClient.destroy(DBFlow._id, DBFlow._rev);
 
-    reply.code(204).send();
+    reply.code(200).send(DBFlow);
   });
   next();
 };
 
-export default deleteFlow;
+export default getFlow;

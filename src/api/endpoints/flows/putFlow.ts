@@ -1,9 +1,9 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import { flowsClient, segmentsClient, sourcesClient } from '../../../DB/client';
-import { DBFlow, Flow } from '../../../DB/schemas/flows/Flow';
+import { flowsClient, sourcesClient } from '../../../db/client';
+import { DBFlow, Flow } from '../../../db/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
-import { DBSource } from '../../../DB/schemas/sources/Source';
+import { DBSource } from '../../../db/schemas/sources/Source';
 
 const opts = {
   schema: {
@@ -72,19 +72,8 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     // Create of update source
     await sourcesClient.insert(updatedSource);
 
-    try {
-      await segmentsClient.get(bodyFlow.id);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (e: any) {
-      if (e.statusCode !== 404) {
-        throw e;
-      }
-      // Create segments
-      segmentsClient.insert({
-        _id: bodyFlow.id,
-        segments: []
-      });
-    }
+    // Segments are stored as individual documents created via
+    // POST /flows/:id/segments, so nothing to pre-create here.
     reply.code(200).send(updatedFlow);
   });
   next();

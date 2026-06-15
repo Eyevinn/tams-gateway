@@ -1,7 +1,10 @@
 import Logger from '../utils/Logger';
 import api from './api';
+import { initDatabases } from '../db/client';
 
-const initServer = () => {
+const initServer = async () => {
+  await initDatabases();
+
   const server = api({ title: 'TAMS-Gateway' });
 
   const PORT = process.env.PORT ? Number(process.env.PORT) : 8000;
