@@ -52,7 +52,7 @@ To start TAMS-Gateway
 pnpm start
 ```
 
-The API is then running on https://localhost:8000
+The API is then running on http://localhost:8000
 
 ## Development
 
@@ -62,7 +62,42 @@ To start TAMS-Gateway in development mode
 pnpm dev
 ```
 
-The API is then running on https://localhost:8000
+The API is then running on http://localhost:8000
+
+## API
+
+Once the server is running, interactive API documentation (Swagger UI) is
+available at `http://localhost:8000/docs`.
+
+The gateway exposes the TAMS resources:
+
+| Method & path                                    | Description                                          |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| `GET /`                                          | Healthcheck                                          |
+| `PUT /flows/{id}`                                | Create or update a flow (and its source)             |
+| `GET /flows`                                     | List flows                                           |
+| `GET /flows/{id}`                                | Get a flow                                           |
+| `DELETE /flows/{id}`                             | Delete a flow and its segments                       |
+| `GET /sources`                                   | List sources                                         |
+| `POST /flows/{id}/storage`                       | Allocate storage and get presigned PUT URLs          |
+| `POST /flows/{id}/segments`                      | Register a segment for a flow                        |
+| `GET /flows/{id}/segments?timerange=[start_end)` | List a flow's segments, optionally filtered by range |
+
+Segments are time-addressed using the TAMS timerange format
+`[<seconds>:<nanoseconds>_<seconds>:<nanoseconds>)` (TAI). On startup the
+gateway creates the required CouchDB databases and the segment index
+automatically.
+
+## Scripts
+
+| Command              | Description                    |
+| -------------------- | ------------------------------ |
+| `pnpm dev`           | Start in watch mode            |
+| `pnpm start`         | Start the server               |
+| `pnpm test`          | Run the test suite (Vitest)    |
+| `pnpm run lint`      | Lint with ESLint               |
+| `pnpm run pretty`    | Check formatting with Prettier |
+| `pnpm run typecheck` | Type-check with TypeScript     |
 
 ## Additional Resources
 
