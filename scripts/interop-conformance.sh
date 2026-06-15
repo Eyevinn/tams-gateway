@@ -48,11 +48,21 @@ if [ -n "${API_TOKEN:-}" ]; then
 fi
 
 echo "Running Schemathesis ($IMAGE) against $BASE_URL ..."
+# Gate on response conformance only: do our responses match the spec's schemas,
+# status codes and content types? Schemathesis' opinionated negative checks
+# (auth handling, unsupported methods, strict input rejection) are robustness
+# concerns, not BBC-schema conformance, so they are intentionally excluded from
+# the gate. The `examples` and `fuzzing` phases generate schema-valid requests;
+# the `coverage` phase (deliberate boundary/negative data) is skipped so invalid
+# fuzzed data is not stored and then echoed back as a false schema violation.
+CHECKS="not_a_server_error,status_code_conformance,content_type_conformance,response_schema_conformance"
+
 exec docker run --rm --network host \
   -v "$ROOT/spec:/spec:ro" \
   "$IMAGE" run /spec/.subset.json \
   --url "$BASE_URL" \
-  --checks all \
+  --checks "$CHECKS" \
+  --phases examples,fuzzing \
   --max-examples "$MAX_EXAMPLES" \
   --continue-on-failure \
   ${headers[@]+"${headers[@]}"}

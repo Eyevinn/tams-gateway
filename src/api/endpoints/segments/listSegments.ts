@@ -20,7 +20,7 @@ const opts = {
       type: 'object',
       properties: {
         timerange: { type: 'string' },
-        limit: { type: 'integer', minimum: 1 }
+        limit: { type: 'integer', minimum: 0 }
       }
     },
     response: {
