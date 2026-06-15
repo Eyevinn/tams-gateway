@@ -10,6 +10,7 @@ export interface Config {
   awsRegion: string;
   corsOrigin: string[] | boolean;
   logLevel: string;
+  apiToken?: string;
 }
 
 // Variables that must be present for the gateway to operate. DB credentials are
@@ -26,6 +27,11 @@ const REQUIRED_ENV = [
 
 export const loadConfig = (): Config => {
   const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
+  // API_TOKEN is optional in development but required in production so the
+  // service is never deployed with authentication accidentally disabled.
+  if (process.env.NODE_ENV === 'production' && !process.env.API_TOKEN) {
+    missing.push('API_TOKEN');
+  }
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(', ')}`
@@ -38,6 +44,7 @@ export const loadConfig = (): Config => {
     corsOrigin: process.env.CORS_ORIGIN
       ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
       : true,
-    logLevel: process.env.LOG_LEVEL || 'info'
+    logLevel: process.env.LOG_LEVEL || 'info',
+    apiToken: process.env.API_TOKEN
   };
 };

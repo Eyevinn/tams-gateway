@@ -22,6 +22,7 @@ describe('loadConfig', () => {
     delete process.env.AWS_REGION;
     delete process.env.CORS_ORIGIN;
     delete process.env.LOG_LEVEL;
+    delete process.env.API_TOKEN;
   });
 
   afterEach(() => {
@@ -41,6 +42,15 @@ describe('loadConfig', () => {
     delete process.env.S3_ENDPOINT_URL;
     expect(() => loadConfig()).toThrow(/DB_URL/);
     expect(() => loadConfig()).toThrow(/S3_ENDPOINT_URL/);
+  });
+
+  it('requires API_TOKEN in production', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => loadConfig()).toThrow(/API_TOKEN/);
+  });
+
+  it('does not require API_TOKEN outside production', () => {
+    expect(() => loadConfig()).not.toThrow();
   });
 
   it('parses PORT and comma-separated CORS origins', () => {

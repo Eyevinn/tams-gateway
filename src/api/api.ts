@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import Logger from '../utils/Logger';
+import { createAuthHook } from './auth';
 import healthcheck from './endpoints/healthcheck';
 import readiness from './endpoints/readiness';
 import errorHandler from './utils/error-handler';
@@ -35,6 +37,16 @@ export default (opts: ApiOptions) => {
     : true;
   api.register(cors, { origin: corsOrigin });
   api.setErrorHandler(errorHandler);
+
+  // Bearer-token authentication. Enabled when API_TOKEN is set; public paths
+  // (liveness, readiness, docs) and CORS preflight bypass it. Registering the
+  // hook on the root instance applies it to every route registered below.
+  const apiToken = process.env.API_TOKEN;
+  if (apiToken) {
+    api.addHook('onRequest', createAuthHook(apiToken));
+  } else {
+    Logger.black('Authentication disabled (API_TOKEN not set)');
+  }
   api.register(swagger, {
     swagger: {
       info: {

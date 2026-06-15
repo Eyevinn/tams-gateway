@@ -33,7 +33,11 @@ DB_PASSWORD=<DB_PASSWORD>
 S3_ENDPOINT_URL=<S3_ENDPOINT_URL>
 AWS_ACCESS_KEY_ID=<ACCESS_KEY_ID>
 AWS_SECRET_ACCESS_KEY=<SECRET_ACCESS_KEY>
+API_TOKEN=<API_TOKEN>
 ```
+
+Optional variables: `PORT` (default `8000`), `AWS_REGION` (default
+`eu-north-1`), `CORS_ORIGIN` (comma-separated allowlist), `LOG_LEVEL`.
 
 If you are using the couchDB and Minio services from OSC then this file will look like:
 
@@ -87,6 +91,19 @@ Segments are time-addressed using the TAMS timerange format
 `[<seconds>:<nanoseconds>_<seconds>:<nanoseconds>)` (TAI). On startup the
 gateway creates the required CouchDB databases and the segment index
 automatically.
+
+## Authentication
+
+When `API_TOKEN` is set, every route except the liveness (`/`), readiness
+(`/readiness`) and docs (`/docs`) endpoints requires a bearer token:
+
+```
+Authorization: Bearer <API_TOKEN>
+```
+
+`API_TOKEN` is optional for local development and **required** when
+`NODE_ENV=production`, so the service is never deployed with authentication
+disabled by accident.
 
 ## Scripts
 
