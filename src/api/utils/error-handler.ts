@@ -6,11 +6,12 @@ export default (
   _: FastifyRequest,
   reply: FastifyReply
 ) => {
-  const errorCode = error.statusCode ?? 500;
-  const errorMessage = error.message ?? 'No Message';
+  const code = error.statusCode ?? 500;
+  const message = error.message ?? 'No Message';
 
   // Log error
-  Logger.red(`[${errorCode}]: ${errorMessage}`);
-  // Send error response
-  reply.status(errorCode).send({ statusCode: errorCode, error: errorMessage });
+  Logger.red(`[${code}]: ${message}`);
+  // Respond in the shape declared by ErrorResponse ({ code, message }) so the
+  // wire format matches the documented schema.
+  reply.status(code).send({ code, message });
 };

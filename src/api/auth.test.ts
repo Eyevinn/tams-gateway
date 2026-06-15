@@ -18,6 +18,8 @@ describe('createAuthHook', () => {
     const app = build();
     const res = await app.inject({ method: 'GET', url: '/flows' });
     expect(res.statusCode).toBe(401);
+    // Error body matches the shared ErrorResponse shape ({ code, message }).
+    expect(res.json()).toEqual({ code: 401, message: 'Unauthorized' });
     await app.close();
   });
 

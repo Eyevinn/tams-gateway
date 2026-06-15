@@ -13,6 +13,20 @@ export interface Config {
   apiToken?: string;
 }
 
+// Shared defaults so a single source defines them. createS3URL reads the region
+// from the environment directly (the AWS SDK is env-driven) but falls back to
+// the same default rather than duplicating the literal.
+export const DEFAULT_PORT = 8000;
+export const DEFAULT_AWS_REGION = 'eu-north-1';
+export const DEFAULT_LOG_LEVEL = 'info';
+
+// Parse a comma-separated CORS_ORIGIN allow-list, or `true` (reflect any origin)
+// when it is unset.
+export const parseCorsOrigin = (
+  value: string | undefined
+): string[] | boolean =>
+  value ? value.split(',').map((origin) => origin.trim()) : true;
+
 // Variables that must be present for the gateway to operate. DB credentials are
 // consumed by the CouchDB client; AWS credentials are read from the environment
 // by the AWS SDK when presigning S3 URLs.
@@ -40,12 +54,10 @@ export const loadConfig = (): Config => {
   }
 
   return {
-    port: process.env.PORT ? Number(process.env.PORT) : 8000,
-    awsRegion: process.env.AWS_REGION || 'eu-north-1',
-    corsOrigin: process.env.CORS_ORIGIN
-      ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-      : true,
-    logLevel: process.env.LOG_LEVEL || 'info',
+    port: process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT,
+    awsRegion: process.env.AWS_REGION || DEFAULT_AWS_REGION,
+    corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
+    logLevel: process.env.LOG_LEVEL || DEFAULT_LOG_LEVEL,
     apiToken: process.env.API_TOKEN
   };
 };

@@ -30,6 +30,7 @@ export const createAuthHook =
     }
     const header = request.headers.authorization ?? '';
     if (!matches(header, `Bearer ${token}`)) {
-      reply.code(401).send({ error: 'Unauthorized' });
+      // Same { code, message } shape as ErrorResponse / the global error handler.
+      reply.code(401).send({ code: 401, message: 'Unauthorized' });
     }
   };

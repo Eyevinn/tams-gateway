@@ -9,7 +9,12 @@ const initServer = async () => {
 
   await initDatabases();
 
-  const server = api({ title: 'TAMS-Gateway' });
+  const server = api({
+    title: 'TAMS-Gateway',
+    corsOrigin: config.corsOrigin,
+    logLevel: config.logLevel,
+    apiToken: config.apiToken
+  });
 
   // Close the server cleanly on termination so rolling deploys drain in-flight
   // requests instead of dropping them.

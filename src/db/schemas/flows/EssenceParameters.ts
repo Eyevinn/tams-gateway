@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox';
-import AspectRatio from './AscpectRatio';
+import AspectRatio from './AspectRatio';
 import AvcParameters from './AvcParameters';
 import FrameRate from './FrameRate';
 import UncParameters from './UncParameters';

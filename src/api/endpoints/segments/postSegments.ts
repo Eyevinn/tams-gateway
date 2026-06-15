@@ -3,6 +3,7 @@ import { FastifyPluginCallback } from 'fastify';
 import Segment from '../../../db/schemas/segments/Segment';
 import { segmentsClient } from '../../../db/client';
 import { segmentKeys } from '../../utils/timerange';
+import getOrUndefined from '../../../db/getOrUndefined';
 
 // A single segment or an array of segments, per the TAMS spec.
 const PostSegmentsBody = Type.Union([Segment, Type.Array(Segment)]);
@@ -65,16 +66,9 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
         const { tsStart, tsEnd } = segmentKeys(segment.timerange);
         const _id = `${id}:${tsStart}:${segment.object_id}`;
 
-        let _rev: string | undefined;
-        try {
-          const existing = await segmentsClient.get(_id);
-          _rev = existing._rev;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (e: any) {
-          if (e.statusCode !== 404) {
-            throw e;
-          }
-        }
+        // Reuse the existing revision so a re-post upserts rather than conflicts.
+        const existing = await getOrUndefined(segmentsClient, _id);
+        const _rev = existing?._rev;
 
         await segmentsClient.insert({
           ...segment,
