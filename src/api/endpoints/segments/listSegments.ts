@@ -58,12 +58,15 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
         // An unparseable timerange is a client error, not a server error.
         throw httpError(400, `Invalid timerange "${timerange}"`);
       }
-      // Segment overlaps query when ts_start < queryEnd && ts_end > queryStart.
+      // A stored segment [ts_start, ts_end) overlaps the query when ts_start
+      // is at/before the query end (inclusive end => $lte, exclusive => $lt)
+      // and ts_end is strictly after the query start. See overlapBounds for
+      // why the ts_end side is always strict ($gt).
       if (bounds.startBelow !== null) {
-        selector.ts_start = { $lt: bounds.startBelow };
+        selector.ts_start = { [bounds.startOp]: bounds.startBelow };
       }
       if (bounds.endAbove !== null) {
-        selector.ts_end = { $gt: bounds.endAbove };
+        selector.ts_end = { [bounds.endOp]: bounds.endAbove };
       }
     }
 

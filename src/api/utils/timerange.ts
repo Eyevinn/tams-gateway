@@ -54,9 +54,14 @@ export const parseTimeRange = (input: string): TimeRange => {
     throw new Error('Empty timerange');
   }
 
-  // Bare timestamp => single instant.
-  if (!value.includes('_') && !/^[[(]/.test(value)) {
-    const t = parseTimestamp(value);
+  // Single timestamp (no '_' separator) => instantaneous timerange [t,t].
+  // The spec permits this with optional inclusive markers ("10:0", "[10:0]")
+  // and forbids exclusive markers on an instant. We strip any surrounding
+  // inclusive markers and treat the lone timestamp as the closed range
+  // [t,t]; "[10:0]" is equivalent to "[10:0_10:0]".
+  if (!value.includes('_')) {
+    const bare = value.replace(/^\[/, '').replace(/\]$/, '');
+    const t = parseTimestamp(bare);
     return { start: t, end: t, startInclusive: true, endInclusive: true };
   }
 
@@ -93,13 +98,38 @@ export const segmentKeys = (
 };
 
 // Query-side overlap bounds for filtering segments against a requested range.
-// A segment [s,e) overlaps the query [qStart,qEnd) when s < qEnd && e > qStart.
-export const overlapBounds = (
-  timerange: string
-): { startBelow: string | null; endAbove: string | null } => {
+//
+// Segments are stored as half-open ranges [ts_start, ts_end): ts_start is
+// inclusive (the first sample) and ts_end is exclusive (one past the last
+// sample). A stored segment overlaps a query range Q when:
+//
+//   (A) ts_start is at or before Q.end, AND
+//   (B) ts_end is strictly after Q.start.
+//
+// The operator on side (A) depends on Q's END inclusivity, because the
+// boundary point ts_start == Q.end is shared only when Q.end is inclusive
+// (']' => $lte, ')' => $lt). Side (B) is always strict ($gt): ts_end is
+// exclusive, so a segment ending exactly at Q.start (ts_end == Q.start)
+// covers no point in Q regardless of whether Q.start is inclusive. This is
+// what makes an instant query "[t]" (start == end == t, both inclusive)
+// match a segment starting exactly at t: ts_start <= t AND ts_end > t.
+//
+// `startOp` constrains the segment's ts_start; `endOp` constrains ts_end.
+// A null bound means that side of the query is open (eternity) and imposes
+// no constraint.
+export interface OverlapBounds {
+  startBelow: string | null; // compare against segment ts_start
+  startOp: '$lt' | '$lte'; // operator for the ts_start constraint
+  endAbove: string | null; // compare against segment ts_end
+  endOp: '$gt'; // operator for the ts_end constraint (always strict)
+}
+
+export const overlapBounds = (timerange: string): OverlapBounds => {
   const range = parseTimeRange(timerange);
   return {
-    startBelow: range.end === null ? null : toKey(range.end), // segment ts_start must be < this
-    endAbove: range.start === null ? null : toKey(range.start) // segment ts_end must be > this
+    startBelow: range.end === null ? null : toKey(range.end),
+    startOp: range.endInclusive ? '$lte' : '$lt',
+    endAbove: range.start === null ? null : toKey(range.start),
+    endOp: '$gt'
   };
 };

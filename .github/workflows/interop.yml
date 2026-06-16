@@ -64,7 +64,48 @@ jobs:
         run: aws --endpoint-url http://localhost:9000 s3 mb s3://tams
       - name: Start gateway
         run: |
-          pnpm start &
-          for i in $(seq 1 30); do curl -sf http://localhost:8000/readiness >/dev/null && break || sleep 2; done
+          # Capture the gateway's own stdout/stderr so a crash under load is
+          # diagnosable instead of surfacing only as a bare "Connection refused"
+          # from the harness. The log is dumped on failure and uploaded as an
+          # artifact below.
+          pnpm start >gateway.log 2>&1 &
+          echo "GATEWAY_PID=$!" >>"$GITHUB_ENV"
+      - name: Wait for gateway readiness
+        run: |
+          # Gate on /readiness with a bounded retry loop. Fail fast (and surface
+          # the gateway log) if it never comes up or dies during startup, rather
+          # than letting the harness run against a dead port. This is a startup
+          # gate, not a blind retry of the test run: a mid-run death still fails
+          # the job (see the conformance step + log dump).
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/readiness >/dev/null 2>&1; then
+              echo "Gateway ready after $((i * 2))s"
+              exit 0
+            fi
+            if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+              echo "::error::Gateway process exited during startup"
+              echo "----- gateway.log -----"; cat gateway.log || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error::Gateway did not become ready within 120s"
+          echo "----- gateway.log -----"; cat gateway.log || true
+          exit 1
       - name: Run Schemathesis conformance
         run: pnpm run interop:conformance
+      - name: Gateway log (on failure)
+        if: failure()
+        run: |
+          echo "----- gateway.log -----"
+          cat gateway.log || echo "(no gateway.log captured)"
+          if ! kill -0 "${GATEWAY_PID:-0}" 2>/dev/null; then
+            echo "::warning::Gateway process is no longer running -- it died during the conformance run (real defect, not a harness flake). See gateway.log above."
+          fi
+      - name: Upload gateway log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-gateway-log
+          path: gateway.log
+          if-no-files-found: ignore
