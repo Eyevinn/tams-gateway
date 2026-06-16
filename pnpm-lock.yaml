@@ -33,8 +33,8 @@ importers:
         specifier: ^0.34.49
         version: 0.34.49
       '@smithy/hash-node':
-        specifier: ^4.3.7
-        version: 4.3.7
+        specifier: ^4.4.0
+        version: 4.4.0
       '@smithy/protocol-http':
         specifier: ^5.4.7
         version: 5.4.7
@@ -710,8 +710,8 @@ packages:
     resolution: {integrity: sha512-NslaM2ir0N2hisDmzXLstPaVINZheh8SokyOC++kzFPloZucL2R7Y7bS57mSzx/1Fc/fqmn7twjkeezTTrV0EA==}
     engines: {node: '>=18.0.0'}
 
-  '@smithy/hash-node@4.3.7':
-    resolution: {integrity: sha512-92AAv0TrUw6nVbKZPiGe+DmfY8CLo6fLh0Xz6dUC75bKviYZSIUMAquC4VTR9fjXlxh+NX+3SqyHhmGVcAqkAg==}
+  '@smithy/hash-node@4.4.0':
+    resolution: {integrity: sha512-MkyiJfdnDlBdmq26Cxskw2dtX6V/EgTjCriPc7Gq0084hncjIFVJ26IwHpauXJT2w79B4umF0erKi4epBR/WDA==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/is-array-buffer@2.2.0':
@@ -1890,7 +1890,7 @@ snapshots:
   '@aws-crypto/crc32@5.2.0':
     dependencies:
       '@aws-crypto/util': 5.2.0
-      '@aws-sdk/types': 3.973.12
+      '@aws-sdk/types': 3.973.13
       tslib: 2.8.1
 
   '@aws-crypto/sha256-browser@5.2.0':
@@ -2100,7 +2100,7 @@ snapshots:
       '@aws-sdk/core': 3.974.21
       '@aws-sdk/nested-clients': 3.997.20
       '@aws-sdk/types': 3.973.12
-      '@smithy/core': 3.24.7
+      '@smithy/core': 3.25.0
       '@smithy/types': 4.14.4
       tslib: 2.8.1
 
@@ -2584,13 +2584,13 @@ snapshots:
 
   '@smithy/fetch-http-handler@5.4.7':
     dependencies:
-      '@smithy/core': 3.24.7
+      '@smithy/core': 3.25.0
       '@smithy/types': 4.14.4
       tslib: 2.8.1
 
-  '@smithy/hash-node@4.3.7':
+  '@smithy/hash-node@4.4.0':
     dependencies:
-      '@smithy/core': 3.24.7
+      '@smithy/core': 3.25.0
       tslib: 2.8.1
 
   '@smithy/is-array-buffer@2.2.0':
@@ -2599,7 +2599,7 @@ snapshots:
 
   '@smithy/node-http-handler@4.7.8':
     dependencies:
-      '@smithy/core': 3.24.7
+      '@smithy/core': 3.25.0
       '@smithy/types': 4.14.4
       tslib: 2.8.1
 
@@ -2610,7 +2610,7 @@ snapshots:
 
   '@smithy/signature-v4@5.4.7':
     dependencies:
-      '@smithy/core': 3.24.7
+      '@smithy/core': 3.25.0
       '@smithy/types': 4.14.4
       tslib: 2.8.1
 
