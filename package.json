@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1068.0",
     "@aws-sdk/credential-providers": "^3.1068.0",
-    "@aws-sdk/s3-request-presigner": "^3.1068.0",
+    "@aws-sdk/s3-request-presigner": "^3.1069.0",
     "@aws-sdk/util-format-url": "^3.972.23",
     "@fastify/cors": "^11.2.0",
     "@fastify/swagger": "^9.7.0",
