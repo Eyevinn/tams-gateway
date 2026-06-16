@@ -30,7 +30,12 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     Params: Static<typeof PutFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
     const { id } = request.params;
-    const bodyFlow: Static<typeof Flow> = request.body;
+    // collected_by is read-only / server-managed per the TAMS spec
+    // (flow-core.json: "Service implementations SHOULD ignore this if given in
+    // a PUT request"). Ignore any client-supplied value so the stored and
+    // returned Flow stays valid against flow.json.
+    const bodyFlow: Static<typeof Flow> = { ...request.body };
+    delete bodyFlow.collected_by;
 
     // A Source is created/updated from source_id; an empty value would produce
     // an invalid document id, so reject it as a client error rather than 500.
