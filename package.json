@@ -28,7 +28,7 @@
     "@sinclair/typebox": "^0.34.49",
     "@smithy/hash-node": "^4.3.7",
     "@smithy/protocol-http": "^5.4.7",
-    "@smithy/url-parser": "^4.3.7",
+    "@smithy/url-parser": "^4.4.0",
     "dotenv": "^17.4.2",
     "fastify": "5.8.5",
     "nano": "^11.0.5",
