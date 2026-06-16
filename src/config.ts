@@ -29,12 +29,14 @@ export const parseCorsOrigin = (
 
 // Variables that must be present for the gateway to operate. DB credentials are
 // consumed by the CouchDB client; AWS credentials are read from the environment
-// by the AWS SDK when presigning S3 URLs.
+// by the AWS SDK when presigning S3 URLs. S3_ENDPOINT_URL is intentionally NOT
+// required: when set it targets an S3-compatible endpoint (e.g. MinIO,
+// path-style), when unset the AWS SDK resolves the native AWS S3 endpoint from
+// AWS_REGION and the bucket. See createS3URL.
 const REQUIRED_ENV = [
   'DB_URL',
   'DB_USERNAME',
   'DB_PASSWORD',
-  'S3_ENDPOINT_URL',
   'S3_BUCKET',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY'

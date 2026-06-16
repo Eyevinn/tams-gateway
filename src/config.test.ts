@@ -5,7 +5,6 @@ const REQUIRED = [
   'DB_URL',
   'DB_USERNAME',
   'DB_PASSWORD',
-  'S3_ENDPOINT_URL',
   'S3_BUCKET',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY'
@@ -40,9 +39,14 @@ describe('loadConfig', () => {
 
   it('throws listing every missing required var', () => {
     delete process.env.DB_URL;
-    delete process.env.S3_ENDPOINT_URL;
+    delete process.env.S3_BUCKET;
     expect(() => loadConfig()).toThrow(/DB_URL/);
-    expect(() => loadConfig()).toThrow(/S3_ENDPOINT_URL/);
+    expect(() => loadConfig()).toThrow(/S3_BUCKET/);
+  });
+
+  it('does not require S3_ENDPOINT_URL (AWS resolves the endpoint from region)', () => {
+    delete process.env.S3_ENDPOINT_URL;
+    expect(() => loadConfig()).not.toThrow();
   });
 
   it('requires API_TOKEN in production', () => {
