@@ -63,4 +63,17 @@ describe('postStorage', () => {
     expect(body.media_objects[0].put_url['content-type']).toBe('video/mp4');
     await app.close();
   });
+
+  it('rejects a limit above the server cap with 400 (DoS guard)', async () => {
+    // An unbounded limit previously allocated until the V8 heap OOMed; the
+    // schema now caps it so an over-limit request is rejected, not fatal.
+    const app = build();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/storage',
+      payload: { limit: 1_000_001 }
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
 });
