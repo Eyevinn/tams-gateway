@@ -81,4 +81,53 @@ describe('putFlow', () => {
     expect(res.body).toBe('');
     await app.close();
   });
+
+  it('strips unknown extra properties so they are never stored or echoed', async () => {
+    // The conformance fuzzer PUT a flow with an arbitrary extra key; the open
+    // schema let it through, persisted it, and echoed it back, violating
+    // flow.json. additionalProperties: false (with Fastify's default
+    // removeAdditional) now strips unknown keys before the handler.
+    flows.get.mockRejectedValue({ statusCode: 404 });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${audioFlow.id}`,
+      payload: { ...audioFlow, unexpectedKey: { nested: 'garbage' } }
+    });
+
+    expect(res.statusCode).toBe(201);
+    const stored = flows.insert.mock.calls[0][0];
+    expect(stored).not.toHaveProperty('unexpectedKey');
+    expect(res.json()).not.toHaveProperty('unexpectedKey');
+    await app.close();
+  });
+
+  it('accepts collected_by as an array but ignores it (read-only) when persisting', async () => {
+    flows.get.mockRejectedValue({ statusCode: 404 });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${audioFlow.id}`,
+      payload: {
+        ...audioFlow,
+        collected_by: ['00000000-0000-1000-8000-0000000000aa']
+      }
+    });
+
+    // The array type is now valid (no 400, no coercion to string), and the
+    // server-managed field is stripped before persist and not echoed back.
+    expect(res.statusCode).toBe(201);
+    const stored = flows.insert.mock.calls[0][0];
+    expect(stored).not.toHaveProperty('collected_by');
+    expect(res.json()).not.toHaveProperty('collected_by');
+    await app.close();
+  });
 });
