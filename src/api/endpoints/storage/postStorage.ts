@@ -10,9 +10,16 @@ const PostStorageErrorBody = Type.Intersect([
   Type.Object({ id: Type.String() })
 ]);
 
+// Server-side cap on how many media objects one request may allocate. Without
+// an upper bound, a large `limit` makes the allocation loop below run unbounded
+// and OOM the process (a real DoS, surfaced by conformance fuzzing sending huge
+// limits). Over-limit requests are rejected with 400 by schema validation.
+const MAX_LIMIT = 1000;
+
 const PostStorageBody = Type.Object({
   // The spec sets no minimum; allow 0 (request no objects) to stay compatible.
-  limit: Type.Optional(Type.Integer({ minimum: 0 })),
+  // `maximum` is a server-side DoS guard (see MAX_LIMIT), not a spec value.
+  limit: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_LIMIT })),
   content_type: Type.Optional(Type.String())
 });
 
