@@ -154,6 +154,82 @@ describe('listSegments', () => {
     await app.close();
   });
 
+  it('uses $lte on ts_start for an inclusive-end query', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[5:0_15:0]'
+    });
+
+    expect(res.statusCode).toBe(200);
+    const selector = mockClient.find.mock.calls[0][0].selector;
+    // Inclusive end => a segment beginning exactly at 15:0 must match.
+    expect(selector.ts_start).toEqual({ $lte: '00000000015000000000' });
+    expect(selector.ts_end).toEqual({ $gt: '00000000005000000000' });
+    await app.close();
+  });
+
+  it('treats an instant query [t] as ts_start <= t and ts_end > t', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[10:0]'
+    });
+
+    expect(res.statusCode).toBe(200);
+    const selector = mockClient.find.mock.calls[0][0].selector;
+    // A segment starting exactly at 10:0 (ts_start == 10:0) must match.
+    expect(selector.ts_start).toEqual({ $lte: '00000000010000000000' });
+    expect(selector.ts_end).toEqual({ $gt: '00000000010000000000' });
+    await app.close();
+  });
+
+  it('keeps $lt for an exclusive-end query (no regression)', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=(5:0_15:0)'
+    });
+
+    expect(res.statusCode).toBe(200);
+    const selector = mockClient.find.mock.calls[0][0].selector;
+    expect(selector.ts_start).toEqual({ $lt: '00000000015000000000' });
+    expect(selector.ts_end).toEqual({ $gt: '00000000005000000000' });
+    await app.close();
+  });
+
+  it('omits the open side for half-open queries', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const resStart = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[10:0_'
+    });
+    expect(resStart.statusCode).toBe(200);
+    const openEnd = mockClient.find.mock.calls[0][0].selector;
+    expect(openEnd.ts_start).toBeUndefined();
+    expect(openEnd.ts_end).toEqual({ $gt: '00000000010000000000' });
+
+    vi.clearAllMocks();
+    mockClient.find.mockResolvedValue({ docs: [] });
+    const resEnd = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=_15:0)'
+    });
+    expect(resEnd.statusCode).toBe(200);
+    const openStart = mockClient.find.mock.calls[0][0].selector;
+    expect(openStart.ts_start).toEqual({ $lt: '00000000015000000000' });
+    expect(openStart.ts_end).toBeUndefined();
+    await app.close();
+  });
+
   it('rejects an unparseable timerange with 400', async () => {
     const app = buildApp(listSegments);
     const res = await app.inject({
