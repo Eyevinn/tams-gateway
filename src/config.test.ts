@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadConfig } from './config';
 
 const REQUIRED = [
@@ -49,13 +49,19 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).not.toThrow();
   });
 
-  it('requires API_TOKEN in production', () => {
+  it('does not require API_TOKEN in production, but warns (auth delegated to an upstream gate when unset)', () => {
     process.env.NODE_ENV = 'production';
-    expect(() => loadConfig()).toThrow(/API_TOKEN/);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(() => loadConfig()).not.toThrow();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('API_TOKEN'));
+    log.mockRestore();
   });
 
-  it('does not require API_TOKEN outside production', () => {
+  it('does not warn about a missing API_TOKEN outside production', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     expect(() => loadConfig()).not.toThrow();
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('API_TOKEN'));
+    log.mockRestore();
   });
 
   it('parses PORT and comma-separated CORS origins', () => {
