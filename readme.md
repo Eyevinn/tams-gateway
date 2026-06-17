@@ -117,7 +117,7 @@ logs a warning at startup when it runs with `NODE_ENV=production` and no
 - **Behind an access gate (e.g. on OSC): leave `API_TOKEN` unset.** The OSC ingress
   gate authenticates callers by validating a Service Access Token (SAT) on the
   `Authorization` header before the request reaches the gateway, so the gateway's
-  own bearer check is redundant. Importantly, if `API_TOKEN` *is* set in this
+  own bearer check is redundant. Importantly, if `API_TOKEN` _is_ set in this
   setup, the gateway would reject SAT-carrying requests (the SAT value is not the
   `API_TOKEN`), so it must be left unset and the gate is the enforcing layer.
 - **Standalone (no gate): set `API_TOKEN`** (or use another auth mode). Here the
