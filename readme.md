@@ -105,9 +105,14 @@ When `API_TOKEN` is set, every route except the liveness (`/`), readiness
 Authorization: Bearer <API_TOKEN>
 ```
 
-`API_TOKEN` is optional for local development and **required** when
-`NODE_ENV=production`, so the service is never deployed with authentication
-disabled by accident.
+`API_TOKEN` is **optional**. When it is set, the gateway enforces the bearer
+token itself. When it is unset, the gateway does not enforce its own auth and
+expects authentication to be handled by an upstream authenticating proxy / access
+gate in front of it (for example the OSC ingress gate, which validates a Service
+Access Token before the request reaches the gateway). To avoid an accidentally
+unprotected deployment, the gateway logs a warning at startup when it runs with
+`NODE_ENV=production` and no `API_TOKEN` set; make sure a gate is in front in that
+case.
 
 ## Scripts
 

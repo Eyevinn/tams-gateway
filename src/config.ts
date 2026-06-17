@@ -5,6 +5,8 @@
 // required environment variables and fails fast with a clear message listing
 // everything that is missing.
 
+import Logger from './utils/Logger';
+
 export interface Config {
   port: number;
   awsRegion: string;
@@ -44,14 +46,24 @@ const REQUIRED_ENV = [
 
 export const loadConfig = (): Config => {
   const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
-  // API_TOKEN is optional in development but required in production so the
-  // service is never deployed with authentication accidentally disabled.
-  if (process.env.NODE_ENV === 'production' && !process.env.API_TOKEN) {
-    missing.push('API_TOKEN');
-  }
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(', ')}`
+    );
+  }
+
+  // API_TOKEN is optional. When set, the gateway enforces its own bearer token
+  // (see api.ts). When unset, authentication is delegated to the surrounding
+  // deployment, i.e. an upstream authenticating proxy / access gate such as the
+  // OSC ingress gate, which validates the caller before the request reaches the
+  // gateway. We warn (rather than fail) in production so an accidentally
+  // unprotected deploy is visible, without blocking gate-fronted deployments that
+  // intentionally run without a gateway-level token.
+  if (process.env.NODE_ENV === 'production' && !process.env.API_TOKEN) {
+    Logger.yellow(
+      'WARNING: running in production without API_TOKEN; the gateway will not ' +
+        'enforce its own bearer auth. Ensure an upstream authenticating ' +
+        'proxy/gate protects this service before exposing it.'
     );
   }
 
