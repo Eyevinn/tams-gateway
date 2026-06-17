@@ -108,11 +108,20 @@ Authorization: Bearer <API_TOKEN>
 `API_TOKEN` is **optional**. When it is set, the gateway enforces the bearer
 token itself. When it is unset, the gateway does not enforce its own auth and
 expects authentication to be handled by an upstream authenticating proxy / access
-gate in front of it (for example the OSC ingress gate, which validates a Service
-Access Token before the request reaches the gateway). To avoid an accidentally
-unprotected deployment, the gateway logs a warning at startup when it runs with
-`NODE_ENV=production` and no `API_TOKEN` set; make sure a gate is in front in that
-case.
+gate in front of it. To avoid an accidentally unprotected deployment, the gateway
+logs a warning at startup when it runs with `NODE_ENV=production` and no
+`API_TOKEN` set; make sure a gate is in front in that case.
+
+### Which layer authenticates
+
+- **Behind an access gate (e.g. on OSC): leave `API_TOKEN` unset.** The OSC ingress
+  gate authenticates callers by validating a Service Access Token (SAT) on the
+  `Authorization` header before the request reaches the gateway, so the gateway's
+  own bearer check is redundant. Importantly, if `API_TOKEN` *is* set in this
+  setup, the gateway would reject SAT-carrying requests (the SAT value is not the
+  `API_TOKEN`), so it must be left unset and the gate is the enforcing layer.
+- **Standalone (no gate): set `API_TOKEN`** (or use another auth mode). Here the
+  gateway's own bearer is the primary, enforcing layer.
 
 ## Scripts
 
