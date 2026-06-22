@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>TAMS gateway inspector</title>
+    <link rel="stylesheet" href="inspector.css" />
+  </head>
+  <body>
+    <header class="app">
+      <h1><a href="?">TAMS gateway inspector</a></h1>
+      <!-- Persistent read-only label (ADR-007 D3). -->
+      <span class="ro-badge" title="This UI only ever issues GET requests"
+        >Read-only inspector</span
+      >
+    </header>
+
+    <!-- Real <a href> tabs so navigation works without JS (ADR-007 D2). The JS
+         marks the active tab via aria-current on load. -->
+    <nav class="tabs" aria-label="Sections">
+      <a href="?" data-tab="flows">Flows</a>
+      <a href="?tab=sources" data-tab="sources">Sources</a>
+    </nav>
+
+    <main id="view">
+      <!-- aria-live region announces async load status to assistive tech. -->
+      <p class="status" role="status" aria-live="polite" id="status">
+        <span class="spinner" aria-hidden="true"></span>Loading…
+      </p>
+      <noscript>
+        <p class="notice">
+          This inspector needs JavaScript to load flow and segment data. The
+          underlying API is browsable directly at
+          <a href="../flows">/flows</a>, <a href="../sources">/sources</a> and
+          <a href="../docs">/docs</a>.
+        </p>
+      </noscript>
+    </main>
+
+    <script src="inspector.js" defer></script>
+  </body>
+</html>

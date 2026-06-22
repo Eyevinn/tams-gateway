@@ -17,7 +17,8 @@ import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
 import getHlsPlaylist from './endpoints/output/getHlsPlaylist';
-import { DEFAULT_LOG_LEVEL } from '../config';
+import ui from './endpoints/ui/ui';
+import { DEFAULT_ENABLE_UI, DEFAULT_LOG_LEVEL } from '../config';
 
 // All runtime configuration the API needs is passed in by the caller (see
 // server.ts), so this builder reads no environment itself and is trivially
@@ -27,6 +28,9 @@ export interface ApiOptions {
   corsOrigin?: string[] | boolean;
   logLevel?: string;
   apiToken?: string;
+  // Built-in read-only inspector UI (ADR-007 D4). Defaults to DEFAULT_ENABLE_UI
+  // so a bare api() call in tests still mirrors production behaviour.
+  enableUi?: boolean;
 }
 
 export default (opts: ApiOptions) => {
@@ -85,7 +89,8 @@ export default (opts: ApiOptions) => {
     routePrefix: '/docs'
   });
 
-  api.register(healthcheck, { title: opts.title });
+  const enableUi = opts.enableUi ?? DEFAULT_ENABLE_UI;
+  api.register(healthcheck, { title: opts.title, enableUi });
   api.register(readiness);
   api.register(putFlow);
   api.register(listFlows);
@@ -99,6 +104,12 @@ export default (opts: ApiOptions) => {
   api.register(listSegments);
 
   api.register(getHlsPlaylist);
+
+  // Built-in read-only inspector UI (ADR-007). Registered only when enabled, so
+  // the lean conformance API runs without the static handler or /ui route.
+  if (enableUi) {
+    api.register(ui);
+  }
 
   return api;
 };

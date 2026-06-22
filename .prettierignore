@@ -7,3 +7,6 @@ spec/examples/
 # Derived / generated interop artifacts.
 spec/.subset.json
 spec/interop-baseline.json
+
+# Vendored third-party (minified) UI asset — kept verbatim, never reformatted.
+src/api/ui/vendor/

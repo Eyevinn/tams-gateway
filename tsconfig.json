@@ -16,5 +16,9 @@
     "resolveJsonModule": true /* Enable importing .json files. */,
     "moduleResolution": "bundler" /* Matches the bundler/transpiler runtime (tsx, vitest, esbuild). */
   },
-  "exclude": ["node_modules", "*.config.js", "scripts"]
+  // src/api/ui holds browser static assets (hand-written inspector JS + vendored
+  // hls.min.js), not Node/TypeScript source. They are served verbatim by
+  // @fastify/static, never compiled, so they are excluded from the Node program
+  // (the Node tsconfig has no DOM lib and checkJs would flag browser globals).
+  "exclude": ["node_modules", "*.config.js", "scripts", "src/api/ui"]
 }
