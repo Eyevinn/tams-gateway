@@ -276,6 +276,10 @@ button.copy:hover {
   font-size: 0.9rem;
 }
 
+.status.error {
+  color: var(--danger, #d9534f);
+}
+
 .notice {
   border-radius: 8px;
   padding: 0.85rem 1rem;

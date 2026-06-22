@@ -27,7 +27,8 @@ const ui: FastifyPluginCallback = (fastify, _, next) => {
     // The inspector is not public; it rides the deployment's own auth (ADR-007
     // D5). No cache busting here keeps it simple; assets are small.
     cacheControl: true,
-    maxAge: '60000'
+    // 60s; assets are tiny and there is no cache-busting, so keep it light.
+    maxAge: 60000
   });
 
   // Bare /ui (no trailing slash) -> serve the index so a browser hitting /ui

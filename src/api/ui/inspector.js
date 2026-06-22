@@ -46,15 +46,6 @@
     });
   }
 
-  function getStatus(path) {
-    // HEAD-like probe used to classify playability without downloading the body.
-    return fetch(new URL(path, API_BASE).href, { method: 'GET' }).then(
-      function (res) {
-        return res.status;
-      }
-    );
-  }
-
   // --- small DOM helpers ----------------------------------------------------
 
   function el(tag, attrs, children) {
@@ -78,7 +69,7 @@
   }
 
   function setStatus(text, isError) {
-    statusEl.className = isError ? 'status' : 'status';
+    statusEl.className = isError ? 'status error' : 'status';
     statusEl.textContent = text || '';
   }
 
