@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #13';
+  var BUILD = 'build 2026-06-22 #14';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -511,6 +511,16 @@
       var m = seekMax();
       if (m > 0) seekTo(m);
     });
+    var live30Btn = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: '» Live -30s',
+      title: 'Jump to 30 seconds before the latest available position'
+    });
+    live30Btn.addEventListener('click', function () {
+      var m = seekMax();
+      if (m > 0) seekTo(m - 30);
+    });
 
     wrap.appendChild(
       el('div', { class: 'player-controls' }, [toggle, copyBtn])
@@ -526,6 +536,7 @@
         jumpBtn('+10s', 10),
         jumpBtn('+30s', 30),
         jumpBtn('+60s', 60),
+        live30Btn,
         liveBtn
       ])
     );
