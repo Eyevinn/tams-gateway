@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #14';
+  var BUILD = 'build 2026-06-22 #15';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -559,6 +559,55 @@
       playStatus.textContent = msg;
     }
 
+    // Parse the playlist ourselves: hls.js does not reliably expose per-fragment
+    // PROGRAM-DATE-TIME here, so map the playhead to wall-clock straight from the
+    // m3u8. segTimes[i] = { pdtMs, mediaStart, dur } where mediaStart is the
+    // cumulative media-time (sum of EXTINF). Gap-immune: each segment carries its
+    // own real wall-clock, so a producer-off gap does not accumulate drift the way
+    // first-segment-PDT + currentTime did.
+    var segTimes = null;
+    fetch(src, { method: 'GET' })
+      .then(function (r) {
+        return r.ok ? r.text() : '';
+      })
+      .then(function (text) {
+        var lines = text.split('\n');
+        var arr = [];
+        var cum = 0;
+        var pdt = null;
+        for (var i = 0; i < lines.length; i++) {
+          var ln = lines[i].trim();
+          if (ln.indexOf('#EXT-X-PROGRAM-DATE-TIME:') === 0) {
+            var t = Date.parse(ln.slice(25));
+            pdt = isNaN(t) ? null : t;
+          } else if (ln.indexOf('#EXTINF:') === 0) {
+            var dur = parseFloat(ln.slice(8)) || 0;
+            arr.push({ pdtMs: pdt, mediaStart: cum, dur: dur });
+            cum += dur;
+            pdt = null;
+          }
+        }
+        if (arr.length) segTimes = arr;
+      })
+      .catch(function () {});
+
+    // Playhead wall-clock from the parsed playlist: find the segment covering the
+    // current media-time and use ITS PROGRAM-DATE-TIME + the offset within it.
+    function playheadFromParse() {
+      if (!segTimes) return null;
+      var ct = video.currentTime || 0;
+      for (var i = segTimes.length - 1; i >= 0; i--) {
+        if (ct >= segTimes[i].mediaStart && segTimes[i].pdtMs != null) {
+          return new Date(
+            segTimes[i].pdtMs + (ct - segTimes[i].mediaStart) * 1000
+          );
+        }
+      }
+      return segTimes[0].pdtMs != null
+        ? new Date(segTimes[0].pdtMs + ct * 1000)
+        : null;
+    }
+
     // Tick the wall-clock readout on a timer (independent of "timeupdate", so it
     // reflects seeks immediately). getDate() returns the playhead's program time
     // (TAI) for the segment ON SCREEN, or null. We render civil local time so it
@@ -589,6 +638,8 @@
       video.src = src;
       playStatus.textContent = 'Native HLS playback.';
       wireClock(function () {
+        var d = playheadFromParse();
+        if (d) return d;
         var start = video.getStartDate ? video.getStartDate() : null;
         if (!start || isNaN(start.getTime())) return null;
         return new Date(start.getTime() + video.currentTime * 1000);
@@ -624,6 +675,8 @@
         playingFrag = data && data.frag ? data.frag : null;
       });
       wireClock(function () {
+        var d = playheadFromParse();
+        if (d) return d;
         if (playingFrag && playingFrag.programDateTime != null) {
           return new Date(
             playingFrag.programDateTime +
