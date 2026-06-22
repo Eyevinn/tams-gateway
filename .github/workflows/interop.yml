@@ -104,7 +104,7 @@ jobs:
           fi
       - name: Upload gateway log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-gateway-log
           path: gateway.log
