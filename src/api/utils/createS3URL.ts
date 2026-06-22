@@ -44,20 +44,31 @@ const getPresigner = (region: string): S3RequestPresigner => {
 // (on allocation) or GET (when listing segments) URL depending on `method`.
 // `options.expiresIn` (seconds) overrides the SDK default (900s); the HLS output
 // path passes a longer TTL so segment URLs in a manifest outlive a 15-min window
-// (ADR-006 D6). Omitting it keeps the existing 900s behaviour for all callers.
+// (ADR-006 D6). `options.signingDate` pins the SigV4 signing time so the SAME
+// object presigns to the SAME URL across calls: the HLS path passes a coarse
+// (hourly) bucket so a live playlist's segment URLs stay STABLE across reloads
+// instead of getting fresh signatures every time, which made hls.js treat the
+// playlist as constantly changing and hammer the manifest. Omitting both keeps
+// the existing fresh-900s behaviour for all other callers.
 const createS3URL = async (
   method: S3Methods,
   key?: string,
-  options?: { expiresIn?: number }
+  options?: { expiresIn?: number; signingDate?: Date }
 ): Promise<string> => {
   const region = process.env.AWS_REGION || DEFAULT_AWS_REGION;
   const url = parseUrl(objectUrl(key ?? '', region));
 
   const presigner = getPresigner(region);
 
+  const presignOpts: { expiresIn?: number; signingDate?: Date } = {};
+  if (options?.expiresIn !== undefined)
+    presignOpts.expiresIn = options.expiresIn;
+  if (options?.signingDate !== undefined)
+    presignOpts.signingDate = options.signingDate;
+
   const signedUrlObject = await presigner.presign(
     new HttpRequest({ ...url, method }),
-    options?.expiresIn !== undefined ? { expiresIn: options.expiresIn } : {}
+    presignOpts
   );
   return formatUrl(signedUrlObject);
 };
