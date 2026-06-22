@@ -50,10 +50,10 @@ beforeEach(() => {
 describe('getHlsPlaylist', () => {
   it('returns 200 with the HLS content type and a media playlist', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
-    // First find: the window query; second find: latest-segment recency probe.
+    // Query order: (1) latest-segment recency probe, (2) the main window query.
     segments.find
-      .mockResolvedValueOnce({ docs: SEG_DOCS })
-      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] });
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] })
+      .mockResolvedValueOnce({ docs: SEG_DOCS });
 
     const app = buildApp();
     const res = await app.inject({
@@ -119,9 +119,9 @@ describe('getHlsPlaylist', () => {
   it('reports MEDIA-SEQUENCE from the count of earlier segments for a windowed request, and caches VOD', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
     segments.find
-      .mockResolvedValueOnce({ docs: SEG_DOCS }) // window query
-      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // latest-segment recency probe
-      .mockResolvedValueOnce({ docs: new Array(5).fill({ _id: 'x' }) }); // count of earlier segments
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: SEG_DOCS }) // (2) main window query
+      .mockResolvedValueOnce({ docs: new Array(5).fill({ _id: 'x' }) }); // (3) count of earlier segments
 
     const app = buildApp();
     // timerange "[0:0_100:0)" url-encoded; triggers the mediaSequence count path.
@@ -138,11 +138,12 @@ describe('getHlsPlaylist', () => {
     await app.close();
   });
 
-  it('honours ?type=live (no PLAYLIST-TYPE / ENDLIST) over recency', async () => {
+  it('honours ?type=live and fetches the LATEST window (descending) at the live edge', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
     segments.find
-      .mockResolvedValueOnce({ docs: SEG_DOCS })
-      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] });
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: SEG_DOCS }) // (2) main window (reversed to play order)
+      .mockResolvedValueOnce({ docs: [] }); // (3) count before window -> mediaSequence 0
 
     const app = buildApp();
     const res = await app.inject({
@@ -154,6 +155,12 @@ describe('getHlsPlaylist', () => {
     expect(res.body).not.toContain('#EXT-X-PLAYLIST-TYPE');
     expect(res.body).not.toContain('#EXT-X-ENDLIST');
     expect(res.headers['cache-control']).toBe('no-store');
+    // The live fix: the main window query must read the most recent segments
+    // (descending), not the oldest, so hls.js sits at the real live edge.
+    expect(segments.find.mock.calls[1][0].sort).toEqual([
+      { flow_id: 'desc' },
+      { ts_start: 'desc' }
+    ]);
     await app.close();
   });
 });
