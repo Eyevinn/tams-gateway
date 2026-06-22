@@ -257,4 +257,39 @@ describe('listSegments', () => {
     });
     await app.close();
   });
+
+  it('sorts ascending by default', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClient.find.mock.calls[0][0].sort).toEqual([
+      { flow_id: 'asc' },
+      { ts_start: 'asc' }
+    ]);
+    await app.close();
+  });
+
+  it('sorts descending for reverse_order=true (newest first, enables span discovery)', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?reverse_order=true&limit=1'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClient.find.mock.calls[0][0].sort).toEqual([
+      { flow_id: 'desc' },
+      { ts_start: 'desc' }
+    ]);
+    expect(mockClient.find.mock.calls[0][0].limit).toBe(1);
+    await app.close();
+  });
 });
