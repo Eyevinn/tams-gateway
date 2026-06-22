@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #13';
+  var BUILD = 'build 2026-06-22 #16';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -132,6 +132,35 @@
   // next-page timerange cursor).
   function nsToTai(ns) {
     return String(ns / NS_PER_S) + ':' + String(ns % NS_PER_S);
+  }
+
+  // --- 10-minute window navigation -----------------------------------------
+  // The navigator browses the recording in fixed 10-minute windows so the UI
+  // never loads the whole-recording VOD playlist. A window is identified by its
+  // TAI epoch SECOND start; the window covers [start, start+600s).
+  var WINDOW_SEC = 600;
+
+  // Civil-local wall-clock ms for a TAI nanosecond instant (matches nsToLocal:
+  // TAI is 37s ahead of UTC, so subtract the offset to read civil time).
+  function nsToCivilMs(ns) {
+    return Number(ns / NS_PER_MS) - TAI_UTC_OFFSET_MS;
+  }
+
+  // Civil-local ms -> TAI epoch seconds (the window-start identifier carried in
+  // the ?start= URL param). Inverse of nsToCivilMs at second granularity.
+  function civilMsToTaiSec(civilMs) {
+    return Math.floor((civilMs + TAI_UTC_OFFSET_MS) / 1000);
+  }
+
+  // Build the output.m3u8 timerange query string for the 10-minute window that
+  // starts at the given TAI epoch second: "[<sec:ns>_<sec:ns>)".
+  function windowTimerangeQuery(startSec) {
+    var startNs = BigInt(startSec) * NS_PER_S;
+    var endNs = (BigInt(startSec) + BigInt(WINDOW_SEC)) * NS_PER_S;
+    return (
+      'timerange=' +
+      encodeURIComponent('[' + nsToTai(startNs) + '_' + nsToTai(endNs) + ')')
+    );
   }
 
   // Furthest seekable position: duration for VOD, else the end of the seekable
@@ -333,10 +362,38 @@
       });
   }
 
-  function renderFlowDetail(flowId, type) {
+  // Discover a flow's first and latest segment cheaply so the navigator can
+  // bound its date/hour pickers to the recorded span. Uses the documented
+  // reverse_order=true&limit=1 pattern (listSegments.ts) rather than scanning.
+  // Returns { firstNs, lastNs } in TAI nanoseconds, or null on empty/failure.
+  function discoverSpan(flowId) {
+    var base = 'flows/' + encodeURIComponent(flowId) + '/segments?limit=1';
+    return Promise.all([
+      getJson(base).catch(function () {
+        return [];
+      }),
+      getJson(base + '&reverse_order=true').catch(function () {
+        return [];
+      })
+    ]).then(function (res) {
+      var first =
+        res[0] && res[0][0] ? parseSegmentRange(res[0][0].timerange) : null;
+      var last =
+        res[1] && res[1][0] ? parseSegmentRange(res[1][0].timerange) : null;
+      if (!first || !last) return null;
+      return { firstNs: first.start, lastNs: last.end };
+    });
+  }
+
+  function renderFlowDetail(flowId, type, start) {
     setStatus('Loading flow…');
-    getJson('flows/' + encodeURIComponent(flowId))
-      .then(function (flow) {
+    Promise.all([
+      getJson('flows/' + encodeURIComponent(flowId)),
+      discoverSpan(flowId)
+    ])
+      .then(function (res) {
+        var flow = res[0];
+        var span = res[1];
         clearView();
         setStatus('');
 
@@ -351,8 +408,29 @@
 
         renderMetaPanel(flow);
 
+        var isLive = type === 'live';
+
+        // Resolve the effective window start (TAI epoch seconds). An explicit
+        // ?start wins. Otherwise, for the default (non-live) view, default to
+        // the LATEST 10-minute window so the UI never loads the whole-recording
+        // VOD playlist. Live ignores the window (it serves the live edge).
+        var effectiveStart = null;
+        if (start != null && start !== '') {
+          effectiveStart = Math.floor(Number(start));
+          if (!isFinite(effectiveStart)) effectiveStart = null;
+        }
+        if (effectiveStart == null && !isLive && span) {
+          // Latest window: align to the 10-minute window containing the last
+          // segment's end, so the default lands on recent material.
+          var lastSec = Number(span.lastNs / NS_PER_S);
+          effectiveStart = Math.max(0, lastSec - WINDOW_SEC);
+        }
+
         if (isPlayable(flow)) {
-          renderPlayer(flow, type);
+          if (!isLive) {
+            renderNavigator(flow.id, span, effectiveStart);
+          }
+          renderPlayer(flow, isLive ? 'live' : 'window', effectiveStart);
         } else {
           viewEl.appendChild(
             notice(
@@ -370,6 +448,130 @@
       .catch(function (err) {
         renderError(err, 'flow');
       });
+  }
+
+  // Date + hour + 10-minute window navigator. Real form controls (labelled,
+  // keyboard-operable) bounded to the recorded span. Changing any control
+  // navigates to ?flow=<id>&start=<taiSec> (a full reload renders that window).
+  function renderNavigator(flowId, span, effectiveStart) {
+    var section = el('section', { class: 'panel navigator' });
+    section.appendChild(el('h2', { text: 'Window' }));
+
+    if (!span) {
+      section.appendChild(
+        notice('empty', 'No segments stored for this flow yet.')
+      );
+      viewEl.appendChild(section);
+      return;
+    }
+
+    var firstCivilMs = nsToCivilMs(span.firstNs);
+    var lastCivilMs = nsToCivilMs(span.lastNs);
+
+    // The civil-local datetime the controls should currently reflect. Default
+    // to the resolved window start (latest window) when no explicit selection.
+    var selCivilMs =
+      effectiveStart != null
+        ? effectiveStart * 1000 - TAI_UTC_OFFSET_MS
+        : lastCivilMs;
+    var selDate = new Date(selCivilMs);
+
+    // Local YYYY-MM-DD for <input type="date"> (value + min/max).
+    function ymd(ms) {
+      var d = new Date(ms);
+      var pad = function (n) {
+        return (n < 10 ? '0' : '') + n;
+      };
+      return (
+        d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+      );
+    }
+
+    var dateInput = el('input', {
+      type: 'date',
+      id: 'nav-date',
+      class: 'nav-date',
+      min: ymd(firstCivilMs),
+      max: ymd(lastCivilMs),
+      value: ymd(selCivilMs)
+    });
+
+    var hourSelect = el('select', { id: 'nav-hour', class: 'nav-hour' });
+    for (var h = 0; h < 24; h++) {
+      var hh = (h < 10 ? '0' : '') + h;
+      hourSelect.appendChild(
+        el('option', {
+          value: String(h),
+          text: hh,
+          selected: h === selDate.getHours() ? '' : null
+        })
+      );
+    }
+
+    var minSelect = el('select', { id: 'nav-min', class: 'nav-min' });
+    var selTenMin = Math.floor(selDate.getMinutes() / 10) * 10;
+    [0, 10, 20, 30, 40, 50].forEach(function (m) {
+      var mm = (m < 10 ? '0' : '') + m;
+      minSelect.appendChild(
+        el('option', {
+          value: String(m),
+          text: mm,
+          selected: m === selTenMin ? '' : null
+        })
+      );
+    });
+
+    // Compose the selected civil window start from the three controls and
+    // navigate. A real location.search assignment => full reload => the router
+    // renders the chosen window.
+    function navigate() {
+      var parts = dateInput.value.split('-');
+      if (parts.length !== 3) return;
+      var d = new Date(
+        Number(parts[0]),
+        Number(parts[1]) - 1,
+        Number(parts[2]),
+        Number(hourSelect.value),
+        Number(minSelect.value),
+        0,
+        0
+      );
+      var taiSec = civilMsToTaiSec(d.getTime());
+      window.location.search =
+        '?flow=' + encodeURIComponent(flowId) + '&start=' + taiSec;
+    }
+    dateInput.addEventListener('change', navigate);
+    hourSelect.addEventListener('change', navigate);
+    minSelect.addEventListener('change', navigate);
+
+    var row = el('div', { class: 'nav-row' }, [
+      el('label', { for: 'nav-date', text: 'Date' }),
+      dateInput,
+      el('label', { for: 'nav-hour', text: 'Hour' }),
+      hourSelect,
+      el('label', { for: 'nav-min', text: 'Min' }),
+      minSelect,
+      el('a', {
+        class: 'copy',
+        href: '?flow=' + encodeURIComponent(flowId) + '&type=live',
+        text: 'Live'
+      })
+    ]);
+    section.appendChild(row);
+
+    section.appendChild(
+      el('p', {
+        class: 'status',
+        text:
+          'Showing a 10-minute window. Recorded span: ' +
+          new Date(firstCivilMs).toLocaleString() +
+          ' to ' +
+          new Date(lastCivilMs).toLocaleString() +
+          '.'
+      })
+    );
+
+    viewEl.appendChild(section);
   }
 
   function renderMetaPanel(flow) {
@@ -398,21 +600,31 @@
     viewEl.appendChild(el('section', { class: 'panel' }, [meta]));
   }
 
-  function renderPlayer(flow, type) {
-    var mode = type === 'live' ? 'live' : 'vod';
+  // mode: 'live' serves the live edge (?type=live); 'window' serves a single
+  // 10-minute window (?timerange=...) selected via the navigator, never the
+  // whole-recording VOD playlist. The clock parses whichever (small) playlist
+  // it gets, so it works for both.
+  function renderPlayer(flow, mode, windowStartSec) {
     var m3u8 = 'flows/' + encodeURIComponent(flow.id) + '/output.m3u8';
-    var m3u8WithType = m3u8 + '?type=' + mode;
-    var absoluteM3u8 = new URL(m3u8WithType, API_BASE).href;
+    var query =
+      mode === 'live'
+        ? 'type=live'
+        : windowStartSec != null
+          ? windowTimerangeQuery(windowStartSec)
+          : 'type=live'; // no segments => fall back to a harmless live probe
+    var absoluteM3u8 = new URL(m3u8 + '?' + query, API_BASE).href;
 
     var wrap = el('section', { class: 'player-wrap' });
 
-    // Live/VOD toggle -> ?type= (default VOD, one-click Live), real <a href>.
+    // Window/Live toggle -> real <a href>. "Window" returns to the latest
+    // 10-minute window (no &start, the router defaults to latest); "Live"
+    // serves the live edge.
     var base = '?flow=' + encodeURIComponent(flow.id);
     var toggle = el('div', { class: 'toggle', role: 'group' }, [
       el('a', {
-        href: base + '&type=vod',
-        text: 'VOD',
-        'aria-current': mode === 'vod' ? 'true' : 'false'
+        href: base,
+        text: 'Window',
+        'aria-current': mode === 'live' ? 'false' : 'true'
       }),
       el('a', {
         href: base + '&type=live',
@@ -511,6 +723,16 @@
       var m = seekMax();
       if (m > 0) seekTo(m);
     });
+    var live30Btn = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: '» Live -30s',
+      title: 'Jump to 30 seconds before the latest available position'
+    });
+    live30Btn.addEventListener('click', function () {
+      var m = seekMax();
+      if (m > 0) seekTo(m - 30);
+    });
 
     wrap.appendChild(
       el('div', { class: 'player-controls' }, [toggle, copyBtn])
@@ -526,6 +748,7 @@
         jumpBtn('+10s', 10),
         jumpBtn('+30s', 30),
         jumpBtn('+60s', 60),
+        live30Btn,
         liveBtn
       ])
     );
@@ -539,6 +762,24 @@
     viewEl.appendChild(wrap);
 
     attachPlayer(video, absoluteM3u8, mode, playStatus, clock);
+
+    // Empty-window note: a 10-minute window with no segments still yields a
+    // valid (empty) playlist, so the player simply shows nothing. Surface a
+    // short note so the empty state is not mistaken for a load failure.
+    if (mode !== 'live') {
+      fetch(absoluteM3u8, { method: 'GET' })
+        .then(function (r) {
+          return r.ok ? r.text() : '';
+        })
+        .then(function (text) {
+          if (text.indexOf('#EXTINF:') === -1) {
+            wrap.appendChild(
+              notice('empty', 'No segments in this 10-minute window.')
+            );
+          }
+        })
+        .catch(function () {});
+    }
   }
 
   // Lazy-load the vendored hls.js only here (ADR-007 D2). Native HLS (Safari)
@@ -546,6 +787,55 @@
   function attachPlayer(video, src, mode, playStatus, clock) {
     function fail(msg) {
       playStatus.textContent = msg;
+    }
+
+    // Parse the playlist ourselves: hls.js does not reliably expose per-fragment
+    // PROGRAM-DATE-TIME here, so map the playhead to wall-clock straight from the
+    // m3u8. segTimes[i] = { pdtMs, mediaStart, dur } where mediaStart is the
+    // cumulative media-time (sum of EXTINF). Gap-immune: each segment carries its
+    // own real wall-clock, so a producer-off gap does not accumulate drift the way
+    // first-segment-PDT + currentTime did.
+    var segTimes = null;
+    fetch(src, { method: 'GET' })
+      .then(function (r) {
+        return r.ok ? r.text() : '';
+      })
+      .then(function (text) {
+        var lines = text.split('\n');
+        var arr = [];
+        var cum = 0;
+        var pdt = null;
+        for (var i = 0; i < lines.length; i++) {
+          var ln = lines[i].trim();
+          if (ln.indexOf('#EXT-X-PROGRAM-DATE-TIME:') === 0) {
+            var t = Date.parse(ln.slice(25));
+            pdt = isNaN(t) ? null : t;
+          } else if (ln.indexOf('#EXTINF:') === 0) {
+            var dur = parseFloat(ln.slice(8)) || 0;
+            arr.push({ pdtMs: pdt, mediaStart: cum, dur: dur });
+            cum += dur;
+            pdt = null;
+          }
+        }
+        if (arr.length) segTimes = arr;
+      })
+      .catch(function () {});
+
+    // Playhead wall-clock from the parsed playlist: find the segment covering the
+    // current media-time and use ITS PROGRAM-DATE-TIME + the offset within it.
+    function playheadFromParse() {
+      if (!segTimes) return null;
+      var ct = video.currentTime || 0;
+      for (var i = segTimes.length - 1; i >= 0; i--) {
+        if (ct >= segTimes[i].mediaStart && segTimes[i].pdtMs != null) {
+          return new Date(
+            segTimes[i].pdtMs + (ct - segTimes[i].mediaStart) * 1000
+          );
+        }
+      }
+      return segTimes[0].pdtMs != null
+        ? new Date(segTimes[0].pdtMs + ct * 1000)
+        : null;
     }
 
     // Tick the wall-clock readout on a timer (independent of "timeupdate", so it
@@ -578,6 +868,8 @@
       video.src = src;
       playStatus.textContent = 'Native HLS playback.';
       wireClock(function () {
+        var d = playheadFromParse();
+        if (d) return d;
         var start = video.getStartDate ? video.getStartDate() : null;
         if (!start || isNaN(start.getTime())) return null;
         return new Date(start.getTime() + video.currentTime * 1000);
@@ -613,6 +905,8 @@
         playingFrag = data && data.frag ? data.frag : null;
       });
       wireClock(function () {
+        var d = playheadFromParse();
+        if (d) return d;
         if (playingFrag && playingFrag.programDateTime != null) {
           return new Date(
             playingFrag.programDateTime +
@@ -832,7 +1126,7 @@
 
     if (flow) {
       markActiveTab('flows');
-      renderFlowDetail(flow, params.get('type') || 'vod');
+      renderFlowDetail(flow, params.get('type'), params.get('start'));
     } else if (source) {
       renderFlowsList(source);
     } else if (tab === 'sources') {
