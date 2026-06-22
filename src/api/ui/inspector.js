@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #10';
+  var BUILD = 'build 2026-06-22 #11';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -547,16 +547,39 @@
       playStatus.textContent = msg;
     }
 
-    // Update the local wall-clock readout of the current playhead on a timer, so
-    // it ticks regardless of whether "timeupdate" fires and immediately reflects
-    // -10s/+10s jumps. getDate() returns a Date for the playhead (or null/invalid
-    // before playback starts). Navigation is a full page load, so the interval
-    // does not leak across views.
+    // Anchor the clock on the playlist's own first PROGRAM-DATE-TIME, fetched
+    // directly. This makes the wall-clock readout independent of hls.js internals
+    // (hls.playingDate is null in many states): playhead time = anchor +
+    // video.currentTime. Exact for a VOD/window playlist (currentTime 0 = first
+    // segment); good enough for live.
+    var anchorMs = null;
+    fetch(src, { method: 'GET' })
+      .then(function (r) {
+        return r.ok ? r.text() : '';
+      })
+      .then(function (text) {
+        var m = text.match(/#EXT-X-PROGRAM-DATE-TIME:(\S+)/);
+        if (m) {
+          var t = Date.parse(m[1]);
+          if (!isNaN(t)) anchorMs = t;
+        }
+      })
+      .catch(function () {});
+
+    // Tick the wall-clock readout on a timer (independent of "timeupdate", and it
+    // reflects seeks immediately). Prefer getDate() (hls.js / native), fall back
+    // to the anchor so it never stays stuck at --:--:--.
+    function isValidDate(d) {
+      return d && typeof d.getTime === 'function' && !isNaN(d.getTime());
+    }
     function wireClock(getDate) {
       if (!clock) return;
       setInterval(function () {
         var d = getDate();
-        if (d && typeof d.getTime === 'function' && !isNaN(d.getTime())) {
+        if (!isValidDate(d) && anchorMs != null) {
+          d = new Date(anchorMs + (video.currentTime || 0) * 1000);
+        }
+        if (isValidDate(d)) {
           clock.textContent =
             d.toLocaleTimeString() +
             '  ·  ' +
@@ -601,16 +624,19 @@
       // programDateTime + how far the playhead is past that fragment's start.
       wireClock(function () {
         if (hls.playingDate) return hls.playingDate;
-        var level =
-          hls.levels && hls.currentLevel >= 0
-            ? hls.levels[hls.currentLevel]
-            : null;
-        var frags = level && level.details ? level.details.fragments : null;
-        if (frags && frags.length && frags[0].programDateTime != null) {
-          return new Date(
-            frags[0].programDateTime +
-              (video.currentTime - frags[0].start) * 1000
-          );
+        // Scan all loaded levels rather than hls.currentLevel, which is -1 under
+        // auto-level even when a level is loaded (the reason this used to stay at
+        // --:--:--). The anchor fallback in wireClock covers the rest.
+        var levels = hls.levels || [];
+        for (var i = 0; i < levels.length; i++) {
+          var det = levels[i] && levels[i].details;
+          var frags = det && det.fragments;
+          if (frags && frags.length && frags[0].programDateTime != null) {
+            return new Date(
+              frags[0].programDateTime +
+                (video.currentTime - frags[0].start) * 1000
+            );
+          }
         }
         return null;
       });

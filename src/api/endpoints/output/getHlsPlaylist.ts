@@ -239,11 +239,21 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     }
 
     // (7) Presign each object with the longer HLS TTL (D6) and build segments.
+    // Pin signing to the current hour so a segment presigns to the SAME URL
+    // across reloads (stable HLS segment URLs); otherwise fresh signatures every
+    // reload make hls.js treat a live playlist as constantly changing and hammer
+    // the manifest.
+    const signingDate = new Date(
+      Math.floor(Date.now() / 3_600_000) * 3_600_000
+    );
     const segments: HlsSegment[] = await Promise.all(
       docs.map(async (doc) => ({
         ts_start: doc.ts_start,
         ts_end: doc.ts_end,
-        uri: await createS3URL('GET', doc.object_id, { expiresIn: hlsUrlTtl() })
+        uri: await createS3URL('GET', doc.object_id, {
+          expiresIn: hlsUrlTtl(),
+          signingDate
+        })
       }))
     );
 
