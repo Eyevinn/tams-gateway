@@ -37,6 +37,21 @@ const liveWindowSec = (): number =>
     ? Number(process.env.LIVE_WINDOW_SEC)
     : DEFAULT_LIVE_WINDOW_SEC;
 
+// Nanoseconds per segment, used as the MEDIA-SEQUENCE unit. Prefer the flow's
+// declared segment_duration; fall back to 2s. Using a fixed unit (not a measured
+// segment) keeps the derived sequence stable per ts_start across reloads.
+const SEGMENT_UNIT_DEFAULT_NS = 2_000_000_000n;
+const mediaSequenceUnitNs = (flow: {
+  segment_duration?: { numerator?: number; denominator?: number };
+}): bigint => {
+  const sd = flow.segment_duration;
+  if (sd?.numerator && sd?.denominator) {
+    const ns = (BigInt(sd.numerator) * 1_000_000_000n) / BigInt(sd.denominator);
+    if (ns > 0n) return ns;
+  }
+  return SEGMENT_UNIT_DEFAULT_NS;
+};
+
 // MPEG-TS gate (ADR-006 D4). The live mux flow has codec "video/mp2t" and
 // container "video/mp2t"; container_mapping.mp2ts_container is the structured
 // signal when a producer sets it.
@@ -203,18 +218,17 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     });
     const docs = result.docs;
 
-    // (6) Media sequence = count of this flow's segments strictly before the
-    // first segment in the window. 0 when the window starts at the flow start
-    // (VOD from the beginning); non-zero and increasing for a live latest-N
-    // window or a timerange window, which keeps hls.js live reloads monotonic.
+    // (6) Media sequence. HLS only needs it stable per-segment and monotonic
+    // across reloads (gaps are tolerated), so derive it from the first segment's
+    // start in units of the segment duration, rather than counting all prior
+    // segments. The count query was O(flow length) and dominated live-reload
+    // latency (hundreds of ms, growing without bound). VOD from the start
+    // conventionally begins at 0.
     let mediaSequence = 0;
     if (docs.length > 0 && (liveLatest || timerange)) {
-      const before = await segmentsClient.find({
-        selector: { flow_id: id, ts_start: { $lt: docs[0].ts_start } },
-        fields: ['_id'],
-        limit: 1_000_000
-      });
-      mediaSequence = before.docs.length;
+      mediaSequence = Number(
+        BigInt(docs[0].ts_start) / mediaSequenceUnitNs(flow)
+      );
     }
 
     // (7) Presign each object with the longer HLS TTL (D6) and build segments.

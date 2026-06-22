@@ -25,6 +25,21 @@ const objectUrl = (objectId: string, region: string): string => {
   return `https://${bucket}.s3.${region}.amazonaws.com/${objectKey}`;
 };
 
+// The presigner is reused across calls: constructing it (and resolving creds)
+// per call cost real time when presigning a whole HLS playlist's segments at
+// once. Region is fixed for the process lifetime, so a lazy singleton is safe.
+let presignerInstance: S3RequestPresigner | undefined;
+const getPresigner = (region: string): S3RequestPresigner => {
+  if (!presignerInstance) {
+    presignerInstance = new S3RequestPresigner({
+      credentials: fromEnv(),
+      region,
+      sha256: Hash.bind(null, 'sha256')
+    });
+  }
+  return presignerInstance;
+};
+
 // Create a presigned S3 URL for an object. The same object_id resolves to a PUT
 // (on allocation) or GET (when listing segments) URL depending on `method`.
 // `options.expiresIn` (seconds) overrides the SDK default (900s); the HLS output
@@ -38,11 +53,7 @@ const createS3URL = async (
   const region = process.env.AWS_REGION || DEFAULT_AWS_REGION;
   const url = parseUrl(objectUrl(key ?? '', region));
 
-  const presigner = new S3RequestPresigner({
-    credentials: fromEnv(),
-    region,
-    sha256: Hash.bind(null, 'sha256')
-  });
+  const presigner = getPresigner(region);
 
   const signedUrlObject = await presigner.presign(
     new HttpRequest({ ...url, method }),

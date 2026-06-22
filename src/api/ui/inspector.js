@@ -27,8 +27,15 @@
   // current document so it works under any mount prefix.
   var API_BASE = new URL('../', window.location.href);
 
+  // Visible build stamp: bump on every UI change so a reload visibly confirms
+  // the browser picked up fresh JS (not a stale cached bundle).
+  var BUILD = 'build 2026-06-22 #7';
+
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
+
+  var buildEl = document.getElementById('build');
+  if (buildEl) buildEl.textContent = BUILD;
 
   // --- read-only fetch helpers (GET only) -----------------------------------
 
@@ -539,6 +546,10 @@
       });
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
         playStatus.textContent = '';
+        // Best-effort autostart so live does not sit waiting for a gesture; if
+        // the browser blocks unmuted autoplay the user uses the native control.
+        var p = video.play();
+        if (p && p.catch) p.catch(function () {});
       });
       hls.on(Hls.Events.ERROR, function (_evt, data) {
         if (data && data.fatal) {

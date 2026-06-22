@@ -83,6 +83,13 @@ header.app h1 a {
   padding: 0.2rem 0.7rem;
 }
 
+.build {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding-left: 0.6rem;
+}
+
 nav.tabs {
   display: flex;
   gap: 0.25rem;

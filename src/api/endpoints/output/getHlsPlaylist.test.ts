@@ -116,23 +116,27 @@ describe('getHlsPlaylist', () => {
     await app.close();
   });
 
-  it('reports MEDIA-SEQUENCE from the count of earlier segments for a windowed request, and caches VOD', async () => {
+  it('derives MEDIA-SEQUENCE from the window start (no count query) and caches VOD', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    // Window starting at 100s; with the default 2s unit, MEDIA-SEQUENCE = 50.
+    const laterDocs = [
+      { object_id: 'bucket/segA.ts', ts_start: ns(100), ts_end: ns(102) },
+      { object_id: 'bucket/segB.ts', ts_start: ns(102), ts_end: ns(104) }
+    ];
     segments.find
-      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
-      .mockResolvedValueOnce({ docs: SEG_DOCS }) // (2) main window query
-      .mockResolvedValueOnce({ docs: new Array(5).fill({ _id: 'x' }) }); // (3) count of earlier segments
+      .mockResolvedValueOnce({ docs: [laterDocs[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: laterDocs }); // (2) main window query
 
     const app = buildApp();
-    // timerange "[0:0_100:0)" url-encoded; triggers the mediaSequence count path.
     const res = await app.inject({
       method: 'GET',
-      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B0%3A0_100%3A0%29'
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B0%3A0_1000%3A0%29'
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('#EXT-X-MEDIA-SEQUENCE:5');
-    expect(segments.find).toHaveBeenCalledTimes(3);
+    expect(res.body).toContain('#EXT-X-MEDIA-SEQUENCE:50');
+    // Only the recency probe + the main query; the O(flow length) count is gone.
+    expect(segments.find).toHaveBeenCalledTimes(2);
     // VOD is briefly cacheable (capped below the presigned-URL TTL), not no-store.
     expect(res.headers['cache-control']).toContain('max-age=');
     await app.close();
@@ -142,8 +146,7 @@ describe('getHlsPlaylist', () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
     segments.find
       .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe -> latest ts_end
-      .mockResolvedValueOnce({ docs: SEG_DOCS }) // (2) main window query
-      .mockResolvedValueOnce({ docs: [] }); // (3) count before window -> mediaSequence 0
+      .mockResolvedValueOnce({ docs: SEG_DOCS }); // (2) main window query
 
     const app = buildApp();
     const res = await app.inject({
