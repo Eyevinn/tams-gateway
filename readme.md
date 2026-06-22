@@ -41,7 +41,11 @@ API_TOKEN=<API_TOKEN>
 never creates buckets.
 
 Optional variables: `PORT` (default `8000`), `AWS_REGION` (default
-`eu-north-1`), `CORS_ORIGIN` (comma-separated allowlist), `LOG_LEVEL`.
+`eu-north-1`), `CORS_ORIGIN` (comma-separated allowlist), `LOG_LEVEL`,
+`ENABLE_UI` (default `true`, serves the inspector UI at `/ui`), `HLS_URL_TTL`
+(default `21600`, presigned segment-URL lifetime in seconds for HLS output) and
+`LIVE_RECENCY_WINDOW` (default `30`, seconds within which the latest segment marks
+a flow live).
 
 If you are using the couchDB and Minio services from OSC then this file will look like:
 
@@ -79,22 +83,52 @@ available at `http://localhost:8000/docs`.
 
 The gateway exposes the TAMS resources:
 
-| Method & path                                    | Description                                          |
-| ------------------------------------------------ | ---------------------------------------------------- |
-| `GET /`                                          | Healthcheck                                          |
-| `PUT /flows/{id}`                                | Create or update a flow (and its source)             |
-| `GET /flows`                                     | List flows                                           |
-| `GET /flows/{id}`                                | Get a flow                                           |
-| `DELETE /flows/{id}`                             | Delete a flow and its segments                       |
-| `GET /sources`                                   | List sources                                         |
-| `POST /flows/{id}/storage`                       | Allocate storage and get presigned PUT URLs          |
-| `POST /flows/{id}/segments`                      | Register a segment for a flow                        |
-| `GET /flows/{id}/segments?timerange=[start_end)` | List a flow's segments, optionally filtered by range |
+| Method & path                                    | Description                                               |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| `GET /`                                          | Healthcheck (browser is redirected to `/ui` when enabled) |
+| `PUT /flows/{id}`                                | Create or update a flow (and its source)                  |
+| `GET /flows`                                     | List flows                                                |
+| `GET /flows/{id}`                                | Get a flow                                                |
+| `DELETE /flows/{id}`                             | Delete a flow and its segments                            |
+| `GET /sources`                                   | List sources                                              |
+| `POST /flows/{id}/storage`                       | Allocate storage and get presigned PUT URLs               |
+| `POST /flows/{id}/segments`                      | Register a segment for a flow                             |
+| `GET /flows/{id}/segments?timerange=[start_end)` | List a flow's segments, optionally filtered by range      |
+| `GET /flows/{id}/output.m3u8?type=live\|vod`     | Playable HLS media playlist for a flow's TS segments      |
 
 Segments are time-addressed using the TAMS timerange format
 `[<seconds>:<nanoseconds>_<seconds>:<nanoseconds>)` (TAI). On startup the
 gateway creates the required CouchDB databases and the segment index
 automatically.
+
+## HLS output
+
+`GET /flows/{id}/output.m3u8` synthesises an HLS media playlist on the fly from a
+flow's MPEG-TS segments, so any TS flow is directly playable in a standard HLS
+client (hls.js, Safari, Omakase Player, ...). Segment URIs are presigned object
+URLs served straight from the store.
+
+- `?type=vod`: a complete playlist ending with `#EXT-X-ENDLIST`.
+- `?type=live`: the latest segments at the live edge, no end tag, advancing on
+  reload. When `type` is omitted the gateway picks live/VOD heuristically; pass it
+  explicitly for predictable behaviour.
+- `?timerange=[start_end)` restricts to a window; `?limit=N` caps the segment count.
+
+Only MPEG-TS (H.264/AAC) flows are playable; others return `415`. Browser playback
+also needs a CORS policy on the object store allowing `GET` + `Range` from the
+player origin.
+
+## Inspector UI
+
+A built-in, read-only inspector is served at `/ui` (enabled by default; set
+`ENABLE_UI=false` to disable). It browses sources, flows and segments with native
+local timestamps, and plays a flow with an embedded HLS player (`-10s`/`+10s`
+jumps, a local wall-clock readout, and a "behind live" indicator). It only ever
+issues `GET` requests. When the UI is enabled, a browser hitting the root `/` is
+redirected to it, while API clients (JSON `Accept`) still get the root-paths
+response. The inspector inherits the deployment's auth (it is not public), so it is
+directly reachable when the gateway runs standalone or behind a browser-friendly
+gate.
 
 ## Authentication
 
