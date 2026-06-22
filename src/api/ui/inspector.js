@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #17';
+  var BUILD = 'build 2026-06-22 #18';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -654,8 +654,15 @@
       }
     });
 
-    // Build the <video> first so the transport can drive it.
-    var video = el('video', { controls: '', playsinline: '' });
+    // Build the <video> first so the transport can drive it. Muted is required
+    // for reliable autostart: browsers block UNMUTED autoplay without a user
+    // gesture, which left live sitting paused at the window start (the playhead
+    // then drifts "minutes behind" the edge and the player looks frozen while
+    // hls.js keeps doing its normal live manifest reloads, read as "hammering").
+    // The live mux flow is video-only (no audio track), so muting costs nothing;
+    // native controls still expose unmute for flows that do carry audio.
+    var video = el('video', { controls: '', playsinline: '', muted: '' });
+    video.muted = true;
 
     // Prominent "watching" wall-clock readout (local time + how far behind).
     var clock = el('span', {
