@@ -446,7 +446,8 @@
     });
     var clock = el('span', {
       class: 'mono clock',
-      title: 'Local time at the current playhead, and how far behind wall-clock it is',
+      title:
+        'Local time at the current playhead, and how far behind wall-clock it is',
       text: '--:--:--'
     });
 
@@ -492,7 +493,9 @@
         var d = getDate();
         if (d && typeof d.getTime === 'function' && !isNaN(d.getTime())) {
           clock.textContent =
-            d.toLocaleTimeString() + '  ·  ' + behindLabel(Date.now() - d.getTime());
+            d.toLocaleTimeString() +
+            '  ·  ' +
+            behindLabel(Date.now() - d.getTime());
         }
       });
     }
