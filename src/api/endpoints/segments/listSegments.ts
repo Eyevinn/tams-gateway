@@ -20,7 +20,8 @@ const opts = {
       type: 'object',
       properties: {
         timerange: { type: 'string' },
-        limit: { type: 'integer', minimum: 0 }
+        limit: { type: 'integer', minimum: 0 },
+        reverse_order: { type: 'boolean', default: false }
       }
     },
     response: {
@@ -35,7 +36,10 @@ const ListSegmentsParams = Type.Object({
 
 const ListSegmentsQueries = Type.Object({
   timerange: Type.Optional(Type.String()),
-  limit: Type.Optional(Type.Integer())
+  limit: Type.Optional(Type.Integer()),
+  // BBC TAMS standard param: return segments newest-first. Also lets a client
+  // discover the flow's latest segment cheaply with reverse_order=true&limit=1.
+  reverse_order: Type.Optional(Type.Boolean())
 });
 
 // Fetch a flow's segments, filtered by timerange via the Mango index rather
@@ -47,7 +51,7 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
     Querystring: Static<typeof ListSegmentsQueries>;
   }>('/flows/:id/segments', opts, async (request, reply) => {
     const { id } = request.params;
-    const { timerange, limit } = request.query;
+    const { timerange, limit, reverse_order } = request.query;
 
     const selector: MangoSelector = { flow_id: id };
     if (timerange) {
@@ -70,9 +74,13 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
       }
     }
 
+    // CouchDB requires a uniform sort direction across all fields; both ascend
+    // or both descend so the [flow_id, ts_start] index can be read forward or in
+    // reverse without an in-memory sort.
+    const dir = reverse_order ? 'desc' : 'asc';
     const result = await segmentsClient.find({
       selector,
-      sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
+      sort: [{ flow_id: dir }, { ts_start: dir }],
       limit: limit ?? DEFAULT_LIMIT
     });
 
