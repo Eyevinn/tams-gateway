@@ -11,11 +11,17 @@ const ROOT_PATHS = ['flows', 'sources'];
 
 export interface HealthcheckOptions {
   title: string;
+  // When the inspector UI is enabled, a browser hitting the root is redirected
+  // to it for minimal friction (ADR-007). Pure content negotiation: only an
+  // Accept that explicitly prefers HTML is redirected, so API clients, the OSC
+  // gate health probe, and conformance tooling (which send JSON / star-star)
+  // still get the unchanged JSON root-paths response.
+  enableUi?: boolean;
 }
 
 const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
   fastify,
-  _opts,
+  opts,
   next
 ) => {
   fastify.get<{ Reply: Static<typeof RootPaths> }>(
@@ -29,7 +35,17 @@ const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
         }
       }
     },
-    async (_, reply) => {
+    async (request, reply) => {
+      // Minimal-friction landing: a browser (Accept prefers text/html) is sent
+      // to the inspector when it is enabled. Everything else (application/json,
+      // */*, no Accept) gets the unchanged JSON root-paths response, so the API
+      // contract, the liveness probe, and conformance tooling are untouched.
+      if (
+        opts.enableUi &&
+        (request.headers.accept ?? '').includes('text/html')
+      ) {
+        return reply.redirect('/ui');
+      }
       reply.send(ROOT_PATHS);
     }
   );

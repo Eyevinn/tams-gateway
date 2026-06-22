@@ -4,10 +4,18 @@ const prettierRecommended = require('eslint-plugin-prettier/recommended');
 const globals = require('globals');
 
 module.exports = tseslint.config(
-  { ignores: ['node_modules', 'coverage', '.husky'] },
+  // Vendored third-party minified asset — never linted (huge single-line file).
+  { ignores: ['node_modules', 'coverage', '.husky', 'src/api/ui/vendor/**'] },
   {
     languageOptions: {
       globals: { ...globals.node, ...globals.es2021 }
+    }
+  },
+  // The inspector client script runs in the browser, not Node.
+  {
+    files: ['src/api/ui/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.browser }
     }
   },
   js.configs.recommended,

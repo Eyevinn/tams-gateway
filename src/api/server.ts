@@ -13,7 +13,8 @@ const initServer = async () => {
     title: 'TAMS-Gateway',
     corsOrigin: config.corsOrigin,
     logLevel: config.logLevel,
-    apiToken: config.apiToken
+    apiToken: config.apiToken,
+    enableUi: config.enableUi
   });
 
   // Close the server cleanly on termination so rolling deploys drain in-flight
