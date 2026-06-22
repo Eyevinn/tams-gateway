@@ -365,3 +365,50 @@ button.copy:hover {
     transform: rotate(360deg);
   }
 }
+
+/* Time navigator (date + hour + 10-minute window). The default browser chrome
+   on <input type="date"> and <select> renders as a bright white control that
+   clashes with the dark panel; restyle them to match the theme (same tokens as
+   button.copy) and keep the native calendar/dropdown affordances usable. */
+.nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+}
+
+.nav-row label {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.nav-date,
+.nav-hour,
+.nav-min {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}
+
+.nav-hour,
+.nav-min {
+  cursor: pointer;
+}
+
+.nav-date::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.nav-date:hover,
+.nav-hour:hover,
+.nav-min:hover,
+.nav-date:focus-visible,
+.nav-hour:focus-visible,
+.nav-min:focus-visible {
+  border-color: var(--accent);
+}
