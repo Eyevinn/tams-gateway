@@ -69,6 +69,18 @@ const isMpegTs = (flow: {
   );
 };
 
+// Whether the most recent segment ended within LIVE_RECENCY_WINDOW of now, i.e.
+// the flow is actively producing. ts_end is TAI nanoseconds while Date.now() is
+// UTC milliseconds, a ~37s skew in 2026. The skew is direction-safe: TAI runs
+// ahead of UTC, so an active flow's ts_end reads as MORE recent than UTC-now,
+// only ever biasing toward "recent", never the reverse.
+const latestIsRecent = (latestTsEnd: string | null): boolean => {
+  if (!latestTsEnd) return false;
+  const nowNs = BigInt(Date.now()) * 1_000_000n;
+  const windowNs = BigInt(Math.round(liveRecencyWindowSec() * 1e9));
+  return BigInt(latestTsEnd) >= nowNs - windowNs;
+};
+
 // Live-vs-VOD resolution (ADR-006 D3), in priority order:
 //   1. explicit ?type wins;
 //   2. tags.flow_status === 'ingesting' OR an open-ended flow.timerange;
@@ -95,19 +107,7 @@ const resolveIsLive = (
     }
   }
 
-  if (latestTsEnd) {
-    // Live if the most recent segment ended within LIVE_RECENCY_WINDOW of now,
-    // i.e. ts_end >= now - window. (A ts_end at/after now also satisfies this.)
-    // ts_end is TAI nanoseconds while Date.now() is UTC milliseconds, a ~37s
-    // skew in 2026. The skew is direction-safe: TAI runs ahead of UTC, so a live
-    // flow's ts_end reads as MORE recent than UTC-now, only ever biasing toward
-    // "live", never misclassifying a live flow as VOD. ?type is the authoritative
-    // override when exact behaviour is required (ADR-006 D3).
-    const nowNs = BigInt(Date.now()) * 1_000_000n;
-    const windowNs = BigInt(Math.round(liveRecencyWindowSec() * 1e9));
-    return BigInt(latestTsEnd) >= nowNs - windowNs;
-  }
-  return false;
+  return latestIsRecent(latestTsEnd);
 };
 
 const opts = {
@@ -240,16 +240,25 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
       }))
     );
 
-    // (8) Build the playlist.
-    const playlist = buildMediaPlaylist({ isLive, mediaSequence, segments });
+    // (8) Build the playlist. A live playlist is left open (no EXT-X-ENDLIST)
+    // ONLY while the flow is actively producing; if the latest segment is stale
+    // (the producer stopped), close it with ENDLIST even for ?type=live so the
+    // player plays the window and stops polling, instead of hammering the
+    // manifest a few times a second looking for segments that never arrive.
+    const activelyLive = isLive && latestIsRecent(latestTsEnd);
+    const playlist = buildMediaPlaylist({
+      isLive: activelyLive,
+      mediaSequence,
+      segments
+    });
 
-    // (9) Reply. Live manifests must never be cached; VOD may be cached briefly
-    // but below the presigned-URL TTL.
+    // (9) Reply. An open live manifest must never be cached; a closed one may be
+    // cached briefly, below the presigned-URL TTL.
     reply
       .header('Content-Type', HLS_CONTENT_TYPE)
       .header(
         'Cache-Control',
-        isLive ? 'no-store' : `max-age=${Math.min(60, hlsUrlTtl())}`
+        activelyLive ? 'no-store' : `max-age=${Math.min(60, hlsUrlTtl())}`
       )
       .code(200)
       .send(playlist);

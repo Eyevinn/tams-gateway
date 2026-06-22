@@ -142,10 +142,13 @@ describe('getHlsPlaylist', () => {
     await app.close();
   });
 
-  it('honours ?type=live and serves a recent live window at the edge', async () => {
+  // A recent (≈ now) ts_end, so the flow reads as actively producing.
+  const recentTsEnd = ns(Math.floor(Date.now() / 1000));
+
+  it('honours ?type=live for an actively producing flow (open playlist at the edge)', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
     segments.find
-      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe -> latest ts_end
+      .mockResolvedValueOnce({ docs: [{ ts_end: recentTsEnd }] }) // (1) recency probe -> fresh
       .mockResolvedValueOnce({ docs: SEG_DOCS }); // (2) main window query
 
     const app = buildApp();
@@ -156,7 +159,7 @@ describe('getHlsPlaylist', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).not.toContain('#EXT-X-PLAYLIST-TYPE');
-    expect(res.body).not.toContain('#EXT-X-ENDLIST');
+    expect(res.body).not.toContain('#EXT-X-ENDLIST'); // open: actively producing
     expect(res.headers['cache-control']).toBe('no-store');
     // The live fix: the main query reads a recent ascending window ending at the
     // live edge (ts_start >= edge - liveWindowSec), not the oldest segments.
@@ -167,6 +170,25 @@ describe('getHlsPlaylist', () => {
     expect(segments.find.mock.calls[1][0].selector.ts_start).toHaveProperty(
       '$gte'
     );
+    await app.close();
+  });
+
+  it('closes a ?type=live playlist with ENDLIST when the flow has stopped producing', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    // Stale latest segment (ancient ts_end) => not actively producing.
+    segments.find
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe -> stale
+      .mockResolvedValueOnce({ docs: SEG_DOCS }); // (2) main window query
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=live'
+    });
+
+    expect(res.statusCode).toBe(200);
+    // ENDLIST so hls.js plays the window and stops polling (no manifest hammer).
+    expect(res.body).toContain('#EXT-X-ENDLIST');
     await app.close();
   });
 });
