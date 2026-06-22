@@ -4,12 +4,13 @@ import { MangoSelector } from 'nano';
 import { flowsClient, segmentsClient } from '../../../db/client';
 import ErrorResponse from '../../utils/error-response';
 import createS3URL from '../../utils/createS3URL';
-import { overlapBounds } from '../../utils/timerange';
+import { overlapBounds, toKey } from '../../utils/timerange';
 import httpError from '../../utils/http-error';
 import { buildMediaPlaylist, HlsSegment } from '../../utils/hlsManifest';
 import {
   DEFAULT_HLS_URL_TTL,
-  DEFAULT_LIVE_RECENCY_WINDOW
+  DEFAULT_LIVE_RECENCY_WINDOW,
+  DEFAULT_LIVE_WINDOW_SEC
 } from '../../../config';
 
 // Mirrors listSegments' DEFAULT_LIMIT so the manifest covers the same window
@@ -29,6 +30,12 @@ const liveRecencyWindowSec = (): number =>
   process.env.LIVE_RECENCY_WINDOW
     ? Number(process.env.LIVE_RECENCY_WINDOW)
     : DEFAULT_LIVE_RECENCY_WINDOW;
+// Span of the live playlist (seconds): a small DVR window ending at the live
+// edge, not the whole flow. Big enough for a few -10s jumps.
+const liveWindowSec = (): number =>
+  process.env.LIVE_WINDOW_SEC
+    ? Number(process.env.LIVE_WINDOW_SEC)
+    : DEFAULT_LIVE_WINDOW_SEC;
 
 // MPEG-TS gate (ADR-006 D4). The live mux flow has codec "video/mp2t" and
 // container "video/mp2t"; container_mapping.mp2ts_container is the structured
@@ -177,20 +184,24 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     const latestTsEnd: string | null = latest.docs[0]?.ts_end ?? null;
     const isLive = resolveIsLive(flow, type, latestTsEnd);
 
-    // (5) Main query. For live without an explicit timerange, fetch the most
-    // recent N segments (descending) and reverse to play order so the playlist
-    // sits at the live edge and advances on reload as the producer appends.
-    // Otherwise read ascending from the start (or within the timerange window).
+    // (5) Main query. For live without an explicit timerange, restrict to a
+    // recent DVR window (the last liveWindowSec seconds, ending at the live edge)
+    // so the playlist is small and sits at the edge, advancing on reload as the
+    // producer appends. Otherwise read from the start (or the timerange window).
     const liveLatest = isLive && !timerange;
+    if (liveLatest && latestTsEnd) {
+      const windowStartNs =
+        BigInt(latestTsEnd) - BigInt(liveWindowSec()) * 1_000_000_000n;
+      selector.ts_start = {
+        $gte: toKey(windowStartNs > 0n ? windowStartNs : 0n)
+      };
+    }
     const result = await segmentsClient.find({
       selector,
-      sort: [
-        { flow_id: liveLatest ? 'desc' : 'asc' },
-        { ts_start: liveLatest ? 'desc' : 'asc' }
-      ],
+      sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
       limit: limit ?? DEFAULT_LIMIT
     });
-    const docs = liveLatest ? [...result.docs].reverse() : result.docs;
+    const docs = result.docs;
 
     // (6) Media sequence = count of this flow's segments strictly before the
     // first segment in the window. 0 when the window starts at the flow start

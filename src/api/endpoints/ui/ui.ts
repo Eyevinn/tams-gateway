@@ -25,16 +25,20 @@ const ui: FastifyPluginCallback = (fastify, _, next) => {
     prefix: '/ui/',
     index: ['index.html'],
     // The inspector is not public; it rides the deployment's own auth (ADR-007
-    // D5). No cache busting here keeps it simple; assets are small.
-    cacheControl: true,
-    // 60s; assets are tiny and there is no cache-busting, so keep it light.
-    maxAge: 60000
+    // D5). Cache-busting: the inspector is iterated on and redeployed, so its
+    // assets must never go stale in the browser. "no-cache" forces revalidation;
+    // the ETag still yields cheap 304s when the bytes are unchanged.
+    cacheControl: false,
+    setHeaders: function (res) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
   });
 
   // Bare /ui (no trailing slash) -> serve the index so a browser hitting /ui
   // lands on the flows list. ignoreTrailingSlash handles the redirect shape but
   // we send the file directly to guarantee a 200 text/html on /ui exactly.
   fastify.get('/ui', (_req, reply) => {
+    reply.header('Cache-Control', 'no-cache');
     return reply.sendFile('index.html', UI_ROOT);
   });
 

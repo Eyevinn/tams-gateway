@@ -34,6 +34,9 @@ export const DEFAULT_LOG_LEVEL = 'info';
 // VOD session; 30s recency window for live-vs-VOD fallback.
 export const DEFAULT_HLS_URL_TTL = 21600;
 export const DEFAULT_LIVE_RECENCY_WINDOW = 30;
+// Live playlist span in seconds: a DVR window ending at the live edge (default
+// 5 minutes), not the whole flow. Big enough for a few -10s jumps.
+export const DEFAULT_LIVE_WINDOW_SEC = 300;
 // Inspector UI defaults ON (ADR-007 D4): the inspector is the human value of
 // "single-click runnable", is read-only and cheap. Set ENABLE_UI=false to drop it.
 export const DEFAULT_ENABLE_UI = true;

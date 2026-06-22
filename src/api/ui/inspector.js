@@ -485,11 +485,14 @@
       playStatus.textContent = msg;
     }
 
-    // Update the local wall-clock readout of the current playhead. getDate()
-    // returns a Date for the playhead (or null/invalid before playback starts).
+    // Update the local wall-clock readout of the current playhead on a timer, so
+    // it ticks regardless of whether "timeupdate" fires and immediately reflects
+    // -10s/+10s jumps. getDate() returns a Date for the playhead (or null/invalid
+    // before playback starts). Navigation is a full page load, so the interval
+    // does not leak across views.
     function wireClock(getDate) {
       if (!clock) return;
-      video.addEventListener('timeupdate', function () {
+      setInterval(function () {
         var d = getDate();
         if (d && typeof d.getTime === 'function' && !isNaN(d.getTime())) {
           clock.textContent =
@@ -497,7 +500,7 @@
             '  ·  ' +
             behindLabel(Date.now() - d.getTime());
         }
-      });
+      }, 500);
     }
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -524,11 +527,12 @@
         fail('This browser cannot play HLS.');
         return;
       }
-      // Defaults only: our live playlist is plain HLS (no EXT-X-PART /
-      // SERVER-CONTROL), so lowLatencyMode must stay OFF or hls.js blocks waiting
-      // for low-latency parts that never arrive (the "live won't start, no error"
-      // symptom). hls.js detects live vs VOD from the absence of EXT-X-ENDLIST.
-      var hls = new Hls();
+      // lowLatencyMode stays OFF (default): our live playlist is plain HLS (no
+      // EXT-X-PART / SERVER-CONTROL), so LL-HLS mode would block waiting for parts
+      // that never arrive (the "live won't start, no error" symptom). hls.js
+      // detects live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength
+      // keeps the live DVR window buffered so -10s jumps have data to seek to.
+      var hls = new Hls({ backBufferLength: 300 });
       // hls.playingDate is the playhead's EXT-X-PROGRAM-DATE-TIME as a Date.
       wireClock(function () {
         return hls.playingDate;
