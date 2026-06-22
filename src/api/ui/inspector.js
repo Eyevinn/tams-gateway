@@ -431,7 +431,7 @@
       '<span class="spinner" aria-hidden="true"></span>Loading player…';
 
     var script = document.createElement('script');
-    script.src = 'vendor/hls.min.js';
+    script.src = '/ui/vendor/hls.min.js';
     script.onload = function () {
       var Hls = window.Hls;
       if (!Hls || !Hls.isSupported()) {
