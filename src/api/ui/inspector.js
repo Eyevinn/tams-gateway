@@ -125,6 +125,21 @@
     return String(ns / NS_PER_S) + ':' + String(ns % NS_PER_S);
   }
 
+  // How far behind wall-clock the given instant is, as a human label, so the
+  // viewer can sense how long ago the material was current. Negative/near-zero
+  // (also covers the ~37s TAI-vs-UTC skew on near-live content) reads as the
+  // live edge.
+  function behindLabel(ms) {
+    if (ms < 2000) return 'at live edge';
+    var s = Math.round(ms / 1000);
+    if (s < 90) return s + 's behind';
+    var m = Math.round(s / 60);
+    if (m < 90) return m + ' min behind';
+    var h = Math.round(m / 60);
+    if (h < 36) return h + ' h behind';
+    return Math.round(h / 24) + ' d behind';
+  }
+
   // --- playability classification (ADR-007 D7 / ADR-006 D4) -----------------
   // The /flows payload carries codec + container, so we can show a "Playable"
   // badge from the list response with no per-row request (confirmed in
@@ -431,7 +446,7 @@
     });
     var clock = el('span', {
       class: 'mono clock',
-      title: 'Local time at the current playhead',
+      title: 'Local time at the current playhead, and how far behind wall-clock it is',
       text: '--:--:--'
     });
 
@@ -476,7 +491,8 @@
       video.addEventListener('timeupdate', function () {
         var d = getDate();
         if (d && typeof d.getTime === 'function' && !isNaN(d.getTime())) {
-          clock.textContent = d.toLocaleTimeString();
+          clock.textContent =
+            d.toLocaleTimeString() + '  ·  ' + behindLabel(Date.now() - d.getTime());
         }
       });
     }
