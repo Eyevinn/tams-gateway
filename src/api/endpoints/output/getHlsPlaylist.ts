@@ -13,9 +13,14 @@ import {
   DEFAULT_LIVE_WINDOW_SEC
 } from '../../../config';
 
-// Mirrors listSegments' DEFAULT_LIMIT so the manifest covers the same window
-// shape as the segments endpoint (ADR-006 D2).
+// Mirrors listSegments' DEFAULT_LIMIT; bounds the live DVR window query (the
+// time window already keeps it small, this is just a safety ceiling).
 const DEFAULT_LIMIT = 1000;
+// VOD / timerange default ceiling: cover a whole recording (a few hours of 2s
+// segments) so the playlist spans the full timeline instead of truncating to the
+// first ~33 min. ~28h at 2s. Very long flows trade a slower manifest build for
+// completeness; a segment-proxy would remove that cost (follow-up).
+const VOD_MAX_SEGMENTS = 50000;
 
 const HLS_CONTENT_TYPE = 'application/vnd.apple.mpegurl';
 
@@ -214,7 +219,9 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     const result = await segmentsClient.find({
       selector,
       sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
-      limit: limit ?? DEFAULT_LIMIT
+      // Live is bounded by the time window above; VOD/timerange span the whole
+      // recording so the player timeline is not truncated to the first ~33 min.
+      limit: limit ?? (liveLatest ? DEFAULT_LIMIT : VOD_MAX_SEGMENTS)
     });
     const docs = result.docs;
 
