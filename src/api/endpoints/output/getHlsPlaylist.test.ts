@@ -116,6 +116,28 @@ describe('getHlsPlaylist', () => {
     await app.close();
   });
 
+  it('reports MEDIA-SEQUENCE from the count of earlier segments for a windowed request, and caches VOD', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    segments.find
+      .mockResolvedValueOnce({ docs: SEG_DOCS }) // window query
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // latest-segment recency probe
+      .mockResolvedValueOnce({ docs: new Array(5).fill({ _id: 'x' }) }); // count of earlier segments
+
+    const app = buildApp();
+    // timerange "[0:0_100:0)" url-encoded; triggers the mediaSequence count path.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B0%3A0_100%3A0%29'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('#EXT-X-MEDIA-SEQUENCE:5');
+    expect(segments.find).toHaveBeenCalledTimes(3);
+    // VOD is briefly cacheable (capped below the presigned-URL TTL), not no-store.
+    expect(res.headers['cache-control']).toContain('max-age=');
+    await app.close();
+  });
+
   it('honours ?type=live (no PLAYLIST-TYPE / ENDLIST) over recency', async () => {
     flows.get.mockResolvedValue(MPEG_TS_FLOW);
     segments.find

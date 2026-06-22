@@ -76,6 +76,11 @@ const resolveIsLive = (
   if (latestTsEnd) {
     // Live if the most recent segment ended within LIVE_RECENCY_WINDOW of now,
     // i.e. ts_end >= now - window. (A ts_end at/after now also satisfies this.)
+    // ts_end is TAI nanoseconds while Date.now() is UTC milliseconds, a ~37s
+    // skew in 2026. The skew is direction-safe: TAI runs ahead of UTC, so a live
+    // flow's ts_end reads as MORE recent than UTC-now, only ever biasing toward
+    // "live", never misclassifying a live flow as VOD. ?type is the authoritative
+    // override when exact behaviour is required (ADR-006 D3).
     const nowNs = BigInt(Date.now()) * 1_000_000n;
     const windowNs = BigInt(Math.round(liveRecencyWindowSec() * 1e9));
     return BigInt(latestTsEnd) >= nowNs - windowNs;
