@@ -263,6 +263,24 @@ video {
   border: 1px solid var(--border);
 }
 
+.watching {
+  margin: 0.5rem 0 0.3rem;
+}
+
+.clock {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.seekbar {
+  width: 100%;
+  margin: 0.2rem 0 0.6rem;
+  cursor: pointer;
+  accent-color: var(--accent-strong);
+}
+
 button.copy {
   font: inherit;
   cursor: pointer;

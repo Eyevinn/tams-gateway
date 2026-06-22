@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #8';
+  var BUILD = 'build 2026-06-22 #10';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -130,6 +130,19 @@
   // next-page timerange cursor).
   function nsToTai(ns) {
     return String(ns / NS_PER_S) + ':' + String(ns % NS_PER_S);
+  }
+
+  // Furthest seekable position: duration for VOD, else the end of the seekable
+  // range (the open live DVR window). 0 before anything is loaded.
+  function seekEnd(video) {
+    if (isFinite(video.duration) && video.duration > 0) return video.duration;
+    try {
+      return video.seekable && video.seekable.length
+        ? video.seekable.end(video.seekable.length - 1)
+        : 0;
+    } catch (e) {
+      return 0;
+    }
   }
 
   // How far behind wall-clock the given instant is, as a human label, so the
@@ -428,51 +441,93 @@
       }
     });
 
-    // Build the <video> first so the skip buttons can drive it (item 4). The
-    // native controls give the scrubber; we add quick -10s/+10s jumps and a
-    // local wall-clock readout of the current playhead.
+    // Build the <video> first so the transport can drive it.
     var video = el('video', { controls: '', playsinline: '' });
 
-    var back10 = el('button', {
-      class: 'copy',
-      type: 'button',
-      text: '-10s',
-      title: 'Jump back 10 seconds'
-    });
-    var fwd10 = el('button', {
-      class: 'copy',
-      type: 'button',
-      text: '+10s',
-      title: 'Jump forward 10 seconds'
-    });
-    back10.addEventListener('click', function () {
-      video.currentTime = Math.max(0, video.currentTime - 10);
-    });
-    fwd10.addEventListener('click', function () {
-      video.currentTime = video.currentTime + 10;
-    });
+    // Prominent "watching" wall-clock readout (local time + how far behind).
     var clock = el('span', {
-      class: 'mono clock',
+      class: 'clock',
       title:
         'Local time at the current playhead, and how far behind wall-clock it is',
       text: '--:--:--'
     });
 
+    // The furthest seekable position: duration for VOD, the seekable end for an
+    // open live DVR window.
+    function seekMax() {
+      return seekEnd(video);
+    }
+    function seekTo(t) {
+      var max = seekMax();
+      var clamped = Math.max(0, max > 0 ? Math.min(max, t) : t);
+      try {
+        video.currentTime = clamped;
+      } catch (e) {
+        /* not seekable yet */
+      }
+    }
+
+    // Draggable seek bar across the whole available timeline.
+    var seekbar = el('input', {
+      type: 'range',
+      class: 'seekbar',
+      min: '0',
+      max: '0',
+      value: '0',
+      step: '0.1',
+      'aria-label': 'Seek'
+    });
+    var scrub = { active: false };
+    seekbar.addEventListener('input', function () {
+      scrub.active = true;
+      seekTo(Number(seekbar.value));
+    });
+    seekbar.addEventListener('change', function () {
+      scrub.active = false;
+    });
+    // Keep the bar in sync with playback (skip while the user is dragging).
+    setInterval(function () {
+      var max = seekMax();
+      if (max > 0) seekbar.max = String(max);
+      if (!scrub.active) seekbar.value = String(video.currentTime || 0);
+    }, 250);
+
+    // Several jump sizes plus a jump to the latest available position.
+    function jumpBtn(label, delta) {
+      var b = el('button', { class: 'copy', type: 'button', text: label });
+      b.addEventListener('click', function () {
+        seekTo(video.currentTime + delta);
+      });
+      return b;
+    }
+    var liveBtn = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: '» Live',
+      title: 'Jump to the latest available position'
+    });
+    liveBtn.addEventListener('click', function () {
+      var m = seekMax();
+      if (m > 0) seekTo(m);
+    });
+
+    wrap.appendChild(
+      el('div', { class: 'player-controls' }, [toggle, copyBtn])
+    );
+    wrap.appendChild(video);
+    wrap.appendChild(el('div', { class: 'watching' }, [clock]));
+    wrap.appendChild(seekbar);
     wrap.appendChild(
       el('div', { class: 'player-controls' }, [
-        toggle,
-        back10,
-        fwd10,
-        copyBtn,
-        clock,
-        el('span', {
-          class: 'mono',
-          text: mode === 'live' ? 'Live edge' : 'Full timeline'
-        })
+        jumpBtn('-60s', -60),
+        jumpBtn('-30s', -30),
+        jumpBtn('-10s', -10),
+        jumpBtn('+10s', 10),
+        jumpBtn('+30s', 30),
+        jumpBtn('+60s', 60),
+        liveBtn
       ])
     );
-
-    wrap.appendChild(video);
 
     var playStatus = el('p', {
       class: 'status',
@@ -540,9 +595,24 @@
       // detects live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength
       // keeps the live DVR window buffered so -10s jumps have data to seek to.
       var hls = new Hls({ backBufferLength: 300 });
-      // hls.playingDate is the playhead's EXT-X-PROGRAM-DATE-TIME as a Date.
+      // Playhead wall-clock. Prefer hls.playingDate, but it returns null in some
+      // states even during playback, so fall back to deriving it from the level's
+      // own PROGRAM-DATE-TIME (which we emit per segment): first fragment's
+      // programDateTime + how far the playhead is past that fragment's start.
       wireClock(function () {
-        return hls.playingDate;
+        if (hls.playingDate) return hls.playingDate;
+        var level =
+          hls.levels && hls.currentLevel >= 0
+            ? hls.levels[hls.currentLevel]
+            : null;
+        var frags = level && level.details ? level.details.fragments : null;
+        if (frags && frags.length && frags[0].programDateTime != null) {
+          return new Date(
+            frags[0].programDateTime +
+              (video.currentTime - frags[0].start) * 1000
+          );
+        }
+        return null;
       });
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
         playStatus.textContent = '';
