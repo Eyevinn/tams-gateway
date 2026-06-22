@@ -165,44 +165,48 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
       }
     }
 
-    const result = await segmentsClient.find({
-      selector,
-      sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
-      limit: limit ?? DEFAULT_LIMIT
+    // (4) Live-vs-VOD must be resolved BEFORE the main query: a live flow serves
+    // the LATEST window (the live edge), VOD serves from the start. The recency
+    // fallback needs the most-recent segment, so probe it first (cheap, limit 1).
+    // When ?type is explicit (the usual case) the probe value is unused.
+    const latest = await segmentsClient.find({
+      selector: { flow_id: id },
+      sort: [{ flow_id: 'desc' }, { ts_start: 'desc' }],
+      limit: 1
     });
-    const docs = result.docs;
-
-    // (4) Live-vs-VOD: the recency fallback needs the latest known ts_end. When
-    // a window is requested the returned docs are that window's; otherwise they
-    // are the flow's earliest segments, so query the single most-recent segment
-    // for the recency check rather than assuming the window contains it.
-    let latestTsEnd: string | null = null;
-    if (docs.length > 0) {
-      const latest = await segmentsClient.find({
-        selector: { flow_id: id },
-        sort: [{ flow_id: 'desc' }, { ts_start: 'desc' }],
-        limit: 1
-      });
-      latestTsEnd = latest.docs[0]?.ts_end ?? null;
-    }
+    const latestTsEnd: string | null = latest.docs[0]?.ts_end ?? null;
     const isLive = resolveIsLive(flow, type, latestTsEnd);
 
-    // (5) Media sequence: 0 with no window, else the count of this flow's
-    // segments strictly before the first returned segment (ADR-006 D3).
+    // (5) Main query. For live without an explicit timerange, fetch the most
+    // recent N segments (descending) and reverse to play order so the playlist
+    // sits at the live edge and advances on reload as the producer appends.
+    // Otherwise read ascending from the start (or within the timerange window).
+    const liveLatest = isLive && !timerange;
+    const result = await segmentsClient.find({
+      selector,
+      sort: [
+        { flow_id: liveLatest ? 'desc' : 'asc' },
+        { ts_start: liveLatest ? 'desc' : 'asc' }
+      ],
+      limit: limit ?? DEFAULT_LIMIT
+    });
+    const docs = liveLatest ? [...result.docs].reverse() : result.docs;
+
+    // (6) Media sequence = count of this flow's segments strictly before the
+    // first segment in the window. 0 when the window starts at the flow start
+    // (VOD from the beginning); non-zero and increasing for a live latest-N
+    // window or a timerange window, which keeps hls.js live reloads monotonic.
     let mediaSequence = 0;
-    if (timerange && docs.length > 0) {
+    if (docs.length > 0 && (liveLatest || timerange)) {
       const before = await segmentsClient.find({
-        selector: {
-          flow_id: id,
-          ts_start: { $lt: docs[0].ts_start }
-        },
+        selector: { flow_id: id, ts_start: { $lt: docs[0].ts_start } },
         fields: ['_id'],
         limit: 1_000_000
       });
       mediaSequence = before.docs.length;
     }
 
-    // (6) Presign each object with the longer HLS TTL (D6) and build segments.
+    // (7) Presign each object with the longer HLS TTL (D6) and build segments.
     const segments: HlsSegment[] = await Promise.all(
       docs.map(async (doc) => ({
         ts_start: doc.ts_start,
@@ -211,10 +215,10 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
       }))
     );
 
-    // (7) Build the playlist.
+    // (8) Build the playlist.
     const playlist = buildMediaPlaylist({ isLive, mediaSequence, segments });
 
-    // (8) Reply. Live manifests must never be cached; VOD may be cached briefly
+    // (9) Reply. Live manifests must never be cached; VOD may be cached briefly
     // but below the presigned-URL TTL.
     reply
       .header('Content-Type', HLS_CONTENT_TYPE)

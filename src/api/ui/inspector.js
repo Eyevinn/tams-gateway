@@ -107,6 +107,39 @@
     return Number(range.end - range.start) / 1e9;
   }
 
+  var NS_PER_MS = 1000000n;
+  var NS_PER_S = 1000000000n;
+
+  // Render a nanosecond instant as native local wall-clock time. TAMS timestamps
+  // are TAI; we treat them as Unix (a ~37s offset in 2026), which is fine for
+  // human orientation and matches the manifest's PROGRAM-DATE-TIME (ADR-006 D3).
+  function nsToLocal(ns) {
+    if (ns == null) return '-';
+    var d = new Date(Number(ns / NS_PER_MS));
+    return d.toLocaleString();
+  }
+
+  // Render a nanosecond instant as a TAMS "sec:ns" timestamp (for building the
+  // next-page timerange cursor).
+  function nsToTai(ns) {
+    return String(ns / NS_PER_S) + ':' + String(ns % NS_PER_S);
+  }
+
+  // How far behind wall-clock the given instant is, as a human label, so the
+  // viewer can sense how long ago the material was current. Negative/near-zero
+  // (also covers the ~37s TAI-vs-UTC skew on near-live content) reads as the
+  // live edge.
+  function behindLabel(ms) {
+    if (ms < 2000) return 'at live edge';
+    var s = Math.round(ms / 1000);
+    if (s < 90) return s + 's behind';
+    var m = Math.round(s / 60);
+    if (m < 90) return m + ' min behind';
+    var h = Math.round(m / 60);
+    if (h < 36) return h + ' h behind';
+    return Math.round(h / 24) + ' d behind';
+  }
+
   // --- playability classification (ADR-007 D7 / ADR-006 D4) -----------------
   // The /flows payload carries codec + container, so we can show a "Playable"
   // badge from the list response with no per-row request (confirmed in
@@ -388,10 +421,43 @@
       }
     });
 
+    // Build the <video> first so the skip buttons can drive it (item 4). The
+    // native controls give the scrubber; we add quick -10s/+10s jumps and a
+    // local wall-clock readout of the current playhead.
+    var video = el('video', { controls: '', playsinline: '' });
+
+    var back10 = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: '-10s',
+      title: 'Jump back 10 seconds'
+    });
+    var fwd10 = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: '+10s',
+      title: 'Jump forward 10 seconds'
+    });
+    back10.addEventListener('click', function () {
+      video.currentTime = Math.max(0, video.currentTime - 10);
+    });
+    fwd10.addEventListener('click', function () {
+      video.currentTime = video.currentTime + 10;
+    });
+    var clock = el('span', {
+      class: 'mono clock',
+      title:
+        'Local time at the current playhead, and how far behind wall-clock it is',
+      text: '--:--:--'
+    });
+
     wrap.appendChild(
       el('div', { class: 'player-controls' }, [
         toggle,
+        back10,
+        fwd10,
         copyBtn,
+        clock,
         el('span', {
           class: 'mono',
           text: mode === 'live' ? 'Live edge' : 'Full timeline'
@@ -399,7 +465,6 @@
       ])
     );
 
-    var video = el('video', { controls: '', playsinline: '' });
     wrap.appendChild(video);
 
     var playStatus = el('p', {
@@ -410,20 +475,41 @@
     wrap.appendChild(playStatus);
     viewEl.appendChild(wrap);
 
-    attachPlayer(video, absoluteM3u8, mode, playStatus);
+    attachPlayer(video, absoluteM3u8, mode, playStatus, clock);
   }
 
   // Lazy-load the vendored hls.js only here (ADR-007 D2). Native HLS (Safari)
   // skips the library entirely.
-  function attachPlayer(video, src, mode, playStatus) {
+  function attachPlayer(video, src, mode, playStatus, clock) {
     function fail(msg) {
       playStatus.textContent = msg;
     }
 
+    // Update the local wall-clock readout of the current playhead. getDate()
+    // returns a Date for the playhead (or null/invalid before playback starts).
+    function wireClock(getDate) {
+      if (!clock) return;
+      video.addEventListener('timeupdate', function () {
+        var d = getDate();
+        if (d && typeof d.getTime === 'function' && !isNaN(d.getTime())) {
+          clock.textContent =
+            d.toLocaleTimeString() +
+            '  ·  ' +
+            behindLabel(Date.now() - d.getTime());
+        }
+      });
+    }
+
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari / native HLS.
+      // Safari / native HLS. getStartDate() is the EXT-X-PROGRAM-DATE-TIME of
+      // the playlist start; the playhead clock is that plus currentTime.
       video.src = src;
       playStatus.textContent = 'Native HLS playback.';
+      wireClock(function () {
+        var start = video.getStartDate ? video.getStartDate() : null;
+        if (!start || isNaN(start.getTime())) return null;
+        return new Date(start.getTime() + video.currentTime * 1000);
+      });
       return;
     }
 
@@ -438,7 +524,15 @@
         fail('This browser cannot play HLS.');
         return;
       }
-      var hls = new Hls({ lowLatencyMode: mode === 'live' });
+      // Defaults only: our live playlist is plain HLS (no EXT-X-PART /
+      // SERVER-CONTROL), so lowLatencyMode must stay OFF or hls.js blocks waiting
+      // for low-latency parts that never arrive (the "live won't start, no error"
+      // symptom). hls.js detects live vs VOD from the absence of EXT-X-ENDLIST.
+      var hls = new Hls();
+      // hls.playingDate is the playhead's EXT-X-PROGRAM-DATE-TIME as a Date.
+      wireClock(function () {
+        return hls.playingDate;
+      });
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
         playStatus.textContent = '';
       });
@@ -462,6 +556,7 @@
   }
 
   function renderSegments(flowId) {
+    var PAGE = 1000; // matches the API's default segment limit
     var section = el('section', { class: 'panel' }, [
       el('h2', { text: 'Segments' }),
       el('p', {
@@ -474,77 +569,117 @@
     ]);
     viewEl.appendChild(section);
 
-    getJson('flows/' + encodeURIComponent(flowId) + '/segments')
-      .then(function (segments) {
+    var tbody = el('tbody', null, []);
+    var caption = el('caption', { text: '' });
+    var table = el('table', null, [
+      caption,
+      el('thead', null, [
+        el('tr', null, [
+          el('th', { scope: 'col', text: '#' }),
+          el('th', { scope: 'col', text: 'Local time (start)' }),
+          el('th', { scope: 'col', text: 'Timerange (TAI)' }),
+          el('th', { scope: 'col', text: 'Duration' }),
+          el('th', { scope: 'col', text: 'Object' })
+        ])
+      ]),
+      tbody
+    ]);
+
+    var total = 0;
+    var discontinuities = 0;
+    var prevEnd = null; // ns end of the previous row, for discontinuity detection
+    var lastEnd = null; // ns end of the last loaded segment, for the next-page cursor
+    var moreBtn = el('button', {
+      class: 'copy',
+      type: 'button',
+      text: 'Load more'
+    });
+
+    function appendRows(segments) {
+      segments.forEach(function (seg) {
+        var range = parseSegmentRange(seg.timerange);
+        if (prevEnd != null && range != null && range.start !== prevEnd) {
+          discontinuities++;
+          tbody.appendChild(
+            el('tr', { class: 'disc-row' }, [
+              el('td', { colspan: '5' }, [
+                el('span', { class: 'disc-tag', text: 'discontinuity' })
+              ])
+            ])
+          );
+        }
+        var dur = durationSeconds(range);
+        tbody.appendChild(
+          el('tr', null, [
+            el('td', { class: 'mono', text: String(total) }),
+            el('td', { text: range ? nsToLocal(range.start) : '-' }),
+            el('td', { class: 'mono', text: seg.timerange }),
+            el('td', {
+              class: 'mono',
+              text: dur == null ? '-' : dur.toFixed(3) + ' s'
+            }),
+            el('td', { class: 'mono', text: seg.object_id })
+          ])
+        );
+        if (range) {
+          prevEnd = range.end;
+          lastEnd = range.end;
+        }
+        total++;
+      });
+      caption.textContent =
+        total +
+        ' segments loaded' +
+        (discontinuities
+          ? ', ' +
+            discontinuities +
+            ' discontinuit' +
+            (discontinuities === 1 ? 'y' : 'ies')
+          : '');
+    }
+
+    // Page through segments with a ts_start cursor so flows with more than the
+    // API's per-request limit are fully browsable (ADR-007 item 2).
+    function loadPage(cursorNs) {
+      var path = 'flows/' + encodeURIComponent(flowId) + '/segments';
+      if (cursorNs != null) {
+        path +=
+          '?timerange=' + encodeURIComponent('[' + nsToTai(cursorNs) + '_)');
+      }
+      moreBtn.disabled = true;
+      return getJson(path).then(function (segments) {
+        // Guard against re-including the boundary segment from the cursor query.
+        if (cursorNs != null && segments.length) {
+          segments = segments.filter(function (s) {
+            var r = parseSegmentRange(s.timerange);
+            return !r || r.start >= cursorNs;
+          });
+        }
+        appendRows(segments);
+        moreBtn.disabled = false;
+        return segments.length >= PAGE; // a full page means there may be more
+      });
+    }
+
+    loadPage(null)
+      .then(function (maybeMore) {
         var segStatus = section.querySelector('#seg-status');
         if (segStatus) segStatus.remove();
-
-        if (!segments.length) {
+        if (total === 0) {
           section.appendChild(
             notice('empty', 'No segments stored for this flow yet.')
           );
           return;
         }
-
-        var rows = [];
-        var prevEnd = null;
-        var discontinuities = 0;
-        segments.forEach(function (seg, i) {
-          var range = parseSegmentRange(seg.timerange);
-          var gap =
-            i > 0 &&
-            prevEnd != null &&
-            range != null &&
-            range.start !== prevEnd;
-          if (gap) {
-            discontinuities++;
-            rows.push(
-              el('tr', { class: 'disc-row' }, [
-                el('td', { colspan: '4' }, [
-                  el('span', { class: 'disc-tag', text: 'discontinuity' })
-                ])
-              ])
-            );
-          }
-          var dur = durationSeconds(range);
-          rows.push(
-            el('tr', null, [
-              el('td', { class: 'mono', text: String(i) }),
-              el('td', { class: 'mono', text: seg.timerange }),
-              el('td', {
-                class: 'mono',
-                text: dur == null ? '-' : dur.toFixed(3) + ' s'
-              }),
-              el('td', { class: 'mono', text: seg.object_id })
-            ])
-          );
-          if (range) prevEnd = range.end;
-        });
-
-        section.appendChild(
-          el('table', null, [
-            el('caption', {
-              text:
-                segments.length +
-                ' segments' +
-                (discontinuities
-                  ? ', ' +
-                    discontinuities +
-                    ' discontinuit' +
-                    (discontinuities === 1 ? 'y' : 'ies')
-                  : '')
-            }),
-            el('thead', null, [
-              el('tr', null, [
-                el('th', { scope: 'col', text: '#' }),
-                el('th', { scope: 'col', text: 'Timerange (TAI)' }),
-                el('th', { scope: 'col', text: 'Duration' }),
-                el('th', { scope: 'col', text: 'Object' })
-              ])
-            ]),
-            el('tbody', null, rows)
-          ])
-        );
+        section.appendChild(table);
+        if (maybeMore) {
+          moreBtn.addEventListener('click', function () {
+            loadPage(lastEnd).then(function (more) {
+              if (!more) moreBtn.remove();
+            });
+          });
+          section.appendChild(moreBtn);
+        }
       })
       .catch(function (err) {
         var segStatus = section.querySelector('#seg-status');
