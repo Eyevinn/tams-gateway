@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #16';
+  var BUILD = 'build 2026-06-22 #17';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');

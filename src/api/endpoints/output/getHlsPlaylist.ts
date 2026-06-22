@@ -258,11 +258,15 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     );
 
     // (8) Build the playlist. A live playlist is left open (no EXT-X-ENDLIST)
-    // ONLY while the flow is actively producing; if the latest segment is stale
-    // (the producer stopped), close it with ENDLIST even for ?type=live so the
-    // player plays the window and stops polling, instead of hammering the
-    // manifest a few times a second looking for segments that never arrive.
-    const activelyLive = isLive && latestIsRecent(latestTsEnd);
+    // ONLY while the flow is actively producing AND the request is unbounded.
+    // A request WITH a timerange is a bounded historical window: it must always
+    // be closed (VOD, ENDLIST) even while the flow keeps producing now, otherwise
+    // hls.js treats a fixed window as a live stream, sits at an edge that never
+    // advances, and stalls to a gray screen. If the latest segment is stale (the
+    // producer stopped), an unbounded ?type=live request is also closed with
+    // ENDLIST so the player plays the window and stops hammering the manifest for
+    // segments that never arrive.
+    const activelyLive = isLive && !timerange && latestIsRecent(latestTsEnd);
     const playlist = buildMediaPlaylist({
       isLive: activelyLive,
       mediaSequence,
