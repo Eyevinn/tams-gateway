@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #18';
+  var BUILD = 'build 2026-06-22 #19';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -661,7 +661,12 @@
     // hls.js keeps doing its normal live manifest reloads, read as "hammering").
     // The live mux flow is video-only (no audio track), so muting costs nothing;
     // native controls still expose unmute for flows that do carry audio.
-    var video = el('video', { controls: '', playsinline: '', muted: '' });
+    var video = el('video', {
+      controls: '',
+      playsinline: '',
+      muted: '',
+      autoplay: ''
+    });
     video.muted = true;
 
     // Prominent "watching" wall-clock readout (local time + how far behind).
@@ -923,12 +928,43 @@
         if (hls.playingDate) return hls.playingDate;
         return null;
       });
+      // Stop refreshing the live manifest while the player is paused. A live
+      // playlist reloads every target-duration; when autoplay is blocked (a
+      // browser policy we cannot override from JS) the player sits paused and
+      // those steady 2s reloads look like "hammering" with no playback. stopLoad
+      // halts the refresh + fragment loop while paused; startLoad resumes it, and
+      // for live we snap back near the edge so resuming does not replay stale
+      // buffer minutes behind. VOD has no manifest refresh, so this only quiets
+      // the live case and is harmless for windows.
+      var isLiveMode = mode === 'live';
+      function seekLiveEdge() {
+        if (!isLiveMode) return;
+        var s = video.seekable;
+        if (s && s.length) {
+          var end = s.end(s.length - 1);
+          if (end - video.currentTime > 12) {
+            video.currentTime = Math.max(0, end - 6);
+          }
+        }
+      }
+      video.addEventListener('pause', function () {
+        if (!video.ended) hls.stopLoad();
+      });
+      video.addEventListener('play', function () {
+        hls.startLoad();
+        setTimeout(seekLiveEdge, 400);
+      });
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
         playStatus.textContent = '';
-        // Best-effort autostart so live does not sit waiting for a gesture; if
-        // the browser blocks unmuted autoplay the user uses the native control.
+        // Best-effort muted autostart. If the browser blocks it, stop the load
+        // loop so a paused player does not keep refreshing the live manifest;
+        // pressing play resumes it (startLoad) and snaps to the live edge.
         var p = video.play();
-        if (p && p.catch) p.catch(function () {});
+        if (p && p.catch)
+          p.catch(function () {
+            hls.stopLoad();
+            playStatus.textContent = 'Press play to start playback.';
+          });
       });
       hls.on(Hls.Events.ERROR, function (_evt, data) {
         if (data && data.fatal) {
