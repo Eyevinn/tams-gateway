@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #11';
+  var BUILD = 'build 2026-06-22 #12';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -116,13 +116,15 @@
 
   var NS_PER_MS = 1000000n;
   var NS_PER_S = 1000000000n;
+  // TAMS timestamps are TAI, which is 37s ahead of UTC (constant since 2017 — no
+  // leap seconds since). Subtract it so the displayed wall-clock is civil local
+  // time, matching e.g. the timecode burnt into the video feed, not TAI+37s.
+  var TAI_UTC_OFFSET_MS = 37000;
 
-  // Render a nanosecond instant as native local wall-clock time. TAMS timestamps
-  // are TAI; we treat them as Unix (a ~37s offset in 2026), which is fine for
-  // human orientation and matches the manifest's PROGRAM-DATE-TIME (ADR-006 D3).
+  // Render a TAI nanosecond instant as civil local wall-clock time.
   function nsToLocal(ns) {
     if (ns == null) return '-';
-    var d = new Date(Number(ns / NS_PER_MS));
+    var d = new Date(Number(ns / NS_PER_MS) - TAI_UTC_OFFSET_MS);
     return d.toLocaleString();
   }
 
@@ -146,9 +148,8 @@
   }
 
   // How far behind wall-clock the given instant is, as a human label, so the
-  // viewer can sense how long ago the material was current. Negative/near-zero
-  // (also covers the ~37s TAI-vs-UTC skew on near-live content) reads as the
-  // live edge.
+  // viewer can sense how long ago the material was current. Called with a
+  // TAI-corrected (civil) delta; near-zero/negative reads as the live edge.
   function behindLabel(ms) {
     if (ms < 2000) return 'at live edge';
     var s = Math.round(ms / 1000);
@@ -580,10 +581,13 @@
           d = new Date(anchorMs + (video.currentTime || 0) * 1000);
         }
         if (isValidDate(d)) {
+          // The playhead Date is TAI (from PROGRAM-DATE-TIME); show civil local
+          // time so it matches the video feed's burnt-in timecode.
+          var civil = new Date(d.getTime() - TAI_UTC_OFFSET_MS);
           clock.textContent =
-            d.toLocaleTimeString() +
+            civil.toLocaleTimeString() +
             '  ·  ' +
-            behindLabel(Date.now() - d.getTime());
+            behindLabel(Date.now() - civil.getTime());
         }
       }, 500);
     }
