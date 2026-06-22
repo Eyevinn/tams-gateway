@@ -16,6 +16,7 @@ import listSources from './endpoints/sources/listSources';
 import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
+import getHlsPlaylist from './endpoints/output/getHlsPlaylist';
 import { DEFAULT_LOG_LEVEL } from '../config';
 
 // All runtime configuration the API needs is passed in by the caller (see
@@ -72,6 +73,10 @@ export default (opts: ApiOptions) => {
         {
           name: 'Storage & Segments',
           description: 'Create storage and get/post segments'
+        },
+        {
+          name: 'Output',
+          description: 'Playable HLS output'
         }
       ]
     }
@@ -92,6 +97,8 @@ export default (opts: ApiOptions) => {
   api.register(postStorage);
   api.register(postSegments);
   api.register(listSegments);
+
+  api.register(getHlsPlaylist);
 
   return api;
 };

@@ -27,9 +27,13 @@ const objectUrl = (objectId: string, region: string): string => {
 
 // Create a presigned S3 URL for an object. The same object_id resolves to a PUT
 // (on allocation) or GET (when listing segments) URL depending on `method`.
+// `options.expiresIn` (seconds) overrides the SDK default (900s); the HLS output
+// path passes a longer TTL so segment URLs in a manifest outlive a 15-min window
+// (ADR-006 D6). Omitting it keeps the existing 900s behaviour for all callers.
 const createS3URL = async (
   method: S3Methods,
-  key?: string
+  key?: string,
+  options?: { expiresIn?: number }
 ): Promise<string> => {
   const region = process.env.AWS_REGION || DEFAULT_AWS_REGION;
   const url = parseUrl(objectUrl(key ?? '', region));
@@ -41,7 +45,8 @@ const createS3URL = async (
   });
 
   const signedUrlObject = await presigner.presign(
-    new HttpRequest({ ...url, method })
+    new HttpRequest({ ...url, method }),
+    options?.expiresIn !== undefined ? { expiresIn: options.expiresIn } : {}
   );
   return formatUrl(signedUrlObject);
 };

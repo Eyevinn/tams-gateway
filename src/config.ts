@@ -13,6 +13,11 @@ export interface Config {
   corsOrigin: string[] | boolean;
   logLevel: string;
   apiToken?: string;
+  // HLS output (ADR-006). hlsUrlTtl is the presigned-URL lifetime (seconds) for
+  // segment URIs in a manifest; liveRecencyWindow is how recent the latest
+  // segment must be (seconds) for the recency fallback to classify a flow live.
+  hlsUrlTtl: number;
+  liveRecencyWindow: number;
 }
 
 // Shared defaults so a single source defines them. createS3URL reads the region
@@ -21,6 +26,10 @@ export interface Config {
 export const DEFAULT_PORT = 8000;
 export const DEFAULT_AWS_REGION = 'eu-north-1';
 export const DEFAULT_LOG_LEVEL = 'info';
+// HLS output defaults (ADR-006 D6/D3). 6h presigned-URL TTL outlives a typical
+// VOD session; 30s recency window for live-vs-VOD fallback.
+export const DEFAULT_HLS_URL_TTL = 21600;
+export const DEFAULT_LIVE_RECENCY_WINDOW = 30;
 
 // Parse a comma-separated CORS_ORIGIN allow-list, or `true` (reflect any origin)
 // when it is unset.
@@ -72,6 +81,12 @@ export const loadConfig = (): Config => {
     awsRegion: process.env.AWS_REGION || DEFAULT_AWS_REGION,
     corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
     logLevel: process.env.LOG_LEVEL || DEFAULT_LOG_LEVEL,
-    apiToken: process.env.API_TOKEN
+    apiToken: process.env.API_TOKEN,
+    hlsUrlTtl: process.env.HLS_URL_TTL
+      ? Number(process.env.HLS_URL_TTL)
+      : DEFAULT_HLS_URL_TTL,
+    liveRecencyWindow: process.env.LIVE_RECENCY_WINDOW
+      ? Number(process.env.LIVE_RECENCY_WINDOW)
+      : DEFAULT_LIVE_RECENCY_WINDOW
   };
 };
