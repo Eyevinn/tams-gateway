@@ -113,8 +113,36 @@ nav.tabs a[aria-current='page'] {
 
 main {
   padding: 1.25rem;
-  max-width: 1100px;
+  max-width: 1600px;
   margin: 0 auto;
+}
+
+/* Flow-detail layout for wide (16:9) screens: the player fills a large left
+   column, the time navigator + metadata sit in a narrower right column, and the
+   segments table (rendered after this grid) spans the full width below. Falls
+   back to a single column on narrow / portrait viewports. */
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin-bottom: 1.25rem;
+}
+
+.detail-main,
+.detail-side {
+  min-width: 0;
+}
+
+.detail-main > :last-child,
+.detail-side > :last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 h2 {
