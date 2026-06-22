@@ -43,9 +43,10 @@ never creates buckets.
 Optional variables: `PORT` (default `8000`), `AWS_REGION` (default
 `eu-north-1`), `CORS_ORIGIN` (comma-separated allowlist), `LOG_LEVEL`,
 `ENABLE_UI` (default `true`, serves the inspector UI at `/ui`), `HLS_URL_TTL`
-(default `21600`, presigned segment-URL lifetime in seconds for HLS output) and
+(default `21600`, presigned segment-URL lifetime in seconds for HLS output),
 `LIVE_RECENCY_WINDOW` (default `30`, seconds within which the latest segment marks
-a flow live).
+a flow live) and `LIVE_WINDOW_SEC` (default `300`, span in seconds of the live
+HLS playlist DVR window ending at the live edge).
 
 If you are using the couchDB and Minio services from OSC then this file will look like:
 
