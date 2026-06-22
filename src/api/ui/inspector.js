@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #11';
+  var BUILD = 'build 2026-06-22 #13';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -116,13 +116,15 @@
 
   var NS_PER_MS = 1000000n;
   var NS_PER_S = 1000000000n;
+  // TAMS timestamps are TAI, which is 37s ahead of UTC (constant since 2017 — no
+  // leap seconds since). Subtract it so the displayed wall-clock is civil local
+  // time, matching e.g. the timecode burnt into the video feed, not TAI+37s.
+  var TAI_UTC_OFFSET_MS = 37000;
 
-  // Render a nanosecond instant as native local wall-clock time. TAMS timestamps
-  // are TAI; we treat them as Unix (a ~37s offset in 2026), which is fine for
-  // human orientation and matches the manifest's PROGRAM-DATE-TIME (ADR-006 D3).
+  // Render a TAI nanosecond instant as civil local wall-clock time.
   function nsToLocal(ns) {
     if (ns == null) return '-';
-    var d = new Date(Number(ns / NS_PER_MS));
+    var d = new Date(Number(ns / NS_PER_MS) - TAI_UTC_OFFSET_MS);
     return d.toLocaleString();
   }
 
@@ -146,9 +148,8 @@
   }
 
   // How far behind wall-clock the given instant is, as a human label, so the
-  // viewer can sense how long ago the material was current. Negative/near-zero
-  // (also covers the ~37s TAI-vs-UTC skew on near-live content) reads as the
-  // live edge.
+  // viewer can sense how long ago the material was current. Called with a
+  // TAI-corrected (civil) delta; near-zero/negative reads as the live edge.
   function behindLabel(ms) {
     if (ms < 2000) return 'at live edge';
     var s = Math.round(ms / 1000);
@@ -547,28 +548,11 @@
       playStatus.textContent = msg;
     }
 
-    // Anchor the clock on the playlist's own first PROGRAM-DATE-TIME, fetched
-    // directly. This makes the wall-clock readout independent of hls.js internals
-    // (hls.playingDate is null in many states): playhead time = anchor +
-    // video.currentTime. Exact for a VOD/window playlist (currentTime 0 = first
-    // segment); good enough for live.
-    var anchorMs = null;
-    fetch(src, { method: 'GET' })
-      .then(function (r) {
-        return r.ok ? r.text() : '';
-      })
-      .then(function (text) {
-        var m = text.match(/#EXT-X-PROGRAM-DATE-TIME:(\S+)/);
-        if (m) {
-          var t = Date.parse(m[1]);
-          if (!isNaN(t)) anchorMs = t;
-        }
-      })
-      .catch(function () {});
-
-    // Tick the wall-clock readout on a timer (independent of "timeupdate", and it
-    // reflects seeks immediately). Prefer getDate() (hls.js / native), fall back
-    // to the anchor so it never stays stuck at --:--:--.
+    // Tick the wall-clock readout on a timer (independent of "timeupdate", so it
+    // reflects seeks immediately). getDate() returns the playhead's program time
+    // (TAI) for the segment ON SCREEN, or null. We render civil local time so it
+    // matches the burnt-in feed timecode, and show "—" until the playhead time is
+    // known rather than ever displaying a guessed (wrong) value.
     function isValidDate(d) {
       return d && typeof d.getTime === 'function' && !isNaN(d.getTime());
     }
@@ -576,15 +560,15 @@
       if (!clock) return;
       setInterval(function () {
         var d = getDate();
-        if (!isValidDate(d) && anchorMs != null) {
-          d = new Date(anchorMs + (video.currentTime || 0) * 1000);
+        if (!isValidDate(d)) {
+          clock.textContent = '—';
+          return;
         }
-        if (isValidDate(d)) {
-          clock.textContent =
-            d.toLocaleTimeString() +
-            '  ·  ' +
-            behindLabel(Date.now() - d.getTime());
-        }
+        var civil = new Date(d.getTime() - TAI_UTC_OFFSET_MS);
+        clock.textContent =
+          civil.toLocaleTimeString() +
+          '  ·  ' +
+          behindLabel(Date.now() - civil.getTime());
       }, 500);
     }
 
@@ -618,26 +602,24 @@
       // detects live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength
       // keeps the live DVR window buffered so -10s jumps have data to seek to.
       var hls = new Hls({ backBufferLength: 300 });
-      // Playhead wall-clock. Prefer hls.playingDate, but it returns null in some
-      // states even during playback, so fall back to deriving it from the level's
-      // own PROGRAM-DATE-TIME (which we emit per segment): first fragment's
-      // programDateTime + how far the playhead is past that fragment's start.
+      // Playhead wall-clock. Track the fragment ACTUALLY ON SCREEN (FRAG_CHANGED)
+      // and use ITS own PROGRAM-DATE-TIME plus only the offset WITHIN that segment.
+      // This is immune to discontinuities: across a producer-off gap, media
+      // currentTime does not advance but wall-clock does, so first-segment-PDT +
+      // currentTime drifts behind by the total gap length (the old bug). Each
+      // segment's own programDateTime already carries the correct wall-clock.
+      var playingFrag = null;
+      hls.on(Hls.Events.FRAG_CHANGED, function (_e, data) {
+        playingFrag = data && data.frag ? data.frag : null;
+      });
       wireClock(function () {
-        if (hls.playingDate) return hls.playingDate;
-        // Scan all loaded levels rather than hls.currentLevel, which is -1 under
-        // auto-level even when a level is loaded (the reason this used to stay at
-        // --:--:--). The anchor fallback in wireClock covers the rest.
-        var levels = hls.levels || [];
-        for (var i = 0; i < levels.length; i++) {
-          var det = levels[i] && levels[i].details;
-          var frags = det && det.fragments;
-          if (frags && frags.length && frags[0].programDateTime != null) {
-            return new Date(
-              frags[0].programDateTime +
-                (video.currentTime - frags[0].start) * 1000
-            );
-          }
+        if (playingFrag && playingFrag.programDateTime != null) {
+          return new Date(
+            playingFrag.programDateTime +
+              (video.currentTime - playingFrag.start) * 1000
+          );
         }
+        if (hls.playingDate) return hls.playingDate;
         return null;
       });
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
