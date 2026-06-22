@@ -10,7 +10,7 @@ jobs:
     if: "!contains(github.event.pull_request.title, 'WIP!')"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - name: Use Node.js
         uses: actions/setup-node@v6
@@ -43,7 +43,7 @@ jobs:
       PORT: '8000'
       BASE_URL: http://localhost:8000
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - name: Use Node.js
         uses: actions/setup-node@v6
