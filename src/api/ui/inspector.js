@@ -608,7 +608,7 @@
     // Show the window's ACTUAL range (start .. start+10min), not just the label.
     // selCivilMs is the selected window start in civil-local ms; the window ends
     // 10 minutes later. The "Recorded material" line is the whole recording (the
-    // navigable bounds), which is NOT the window — spelling that out avoids the
+    // navigable bounds), which is NOT the window, spelling that out avoids the
     // "is the window start..now?" confusion.
     var winEndCivilMs = selCivilMs + WINDOW_SEC * 1000;
     section.appendChild(
