@@ -102,6 +102,7 @@ The gateway exposes the TAMS resources:
 | `GET /flow-delete-requests/{requestId}`             | Get a deletion request                                    |
 | `GET /flows/{id}/output.m3u8?type=live\|vod`        | Playable HLS media playlist for a flow's TS segments      |
 | `GET /service`                                      | Service descriptor (advertises supported event streams)   |
+| `GET /service/storage-backends`                     | List the object-store backends available                  |
 | `POST /service/webhooks`                            | Register a webhook for event notifications                |
 | `GET /service/webhooks`                             | List registered webhooks                                  |
 | `GET /service/webhooks/{webhookId}`                 | Get a webhook                                             |

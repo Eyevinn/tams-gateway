@@ -48,4 +48,15 @@ describe('api', () => {
     expect(response.json()).toEqual(['flows', 'sources']);
     await server.close();
   });
+
+  // Fastify auto-exposes HEAD for every GET route (exposeHeadRoutes default), so
+  // the TAMS HEAD operations work at runtime even though they are not declared
+  // in the generated OpenAPI. Lock that behaviour in on a DB-free route.
+  it('serves HEAD for a GET route (no body)', async () => {
+    const server = api({ title: 'TAMS-Gateway', enableUi: false });
+    const response = await server.inject({ method: 'HEAD', url: '/' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('');
+    await server.close();
+  });
 });

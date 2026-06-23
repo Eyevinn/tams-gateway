@@ -26,6 +26,7 @@
   "GET /flows/{}/tags",
   "GET /flows/{}/tags/{}",
   "GET /service",
+  "GET /service/storage-backends",
   "GET /service/webhooks",
   "GET /service/webhooks/{}",
   "GET /sources",

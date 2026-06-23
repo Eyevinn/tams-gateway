@@ -22,6 +22,7 @@ import listDeletionRequests from './endpoints/deletion-requests/listDeletionRequ
 import getDeletionRequest from './endpoints/deletion-requests/getDeletionRequest';
 import getHlsPlaylist from './endpoints/output/getHlsPlaylist';
 import getService from './endpoints/service/getService';
+import getStorageBackends from './endpoints/service/getStorageBackends';
 import postWebhook from './endpoints/webhooks/postWebhook';
 import listWebhooks from './endpoints/webhooks/listWebhooks';
 import getWebhook from './endpoints/webhooks/getWebhook';
@@ -249,6 +250,7 @@ export default (opts: ApiOptions) => {
   api.register(getHlsPlaylist);
 
   api.register(getService);
+  api.register(getStorageBackends);
   api.register(postWebhook);
   api.register(listWebhooks);
   api.register(getWebhook);
