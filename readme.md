@@ -85,24 +85,27 @@ available at `http://localhost:8000/docs`.
 
 The gateway exposes the TAMS resources:
 
-| Method & path                                    | Description                                               |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| `GET /`                                          | Healthcheck (browser is redirected to `/ui` when enabled) |
-| `PUT /flows/{id}`                                | Create or update a flow (and its source)                  |
-| `GET /flows`                                     | List flows                                                |
-| `GET /flows/{id}`                                | Get a flow                                                |
-| `DELETE /flows/{id}`                             | Delete a flow and its segments                            |
-| `GET /sources`                                   | List sources                                              |
-| `POST /flows/{id}/storage`                       | Allocate storage and get presigned PUT URLs               |
-| `POST /flows/{id}/segments`                      | Register a segment for a flow                             |
-| `GET /flows/{id}/segments?timerange=[start_end)` | List a flow's segments, optionally filtered by range      |
-| `GET /flows/{id}/output.m3u8?type=live\|vod`     | Playable HLS media playlist for a flow's TS segments      |
-| `GET /service`                                   | Service descriptor (advertises supported event streams)   |
-| `POST /service/webhooks`                         | Register a webhook for event notifications                |
-| `GET /service/webhooks`                          | List registered webhooks                                  |
-| `GET /service/webhooks/{webhookId}`              | Get a webhook                                             |
-| `PUT /service/webhooks/{webhookId}`              | Update a webhook                                          |
-| `DELETE /service/webhooks/{webhookId}`           | Delete a webhook                                          |
+| Method & path                                       | Description                                               |
+| --------------------------------------------------- | --------------------------------------------------------- |
+| `GET /`                                             | Healthcheck (browser is redirected to `/ui` when enabled) |
+| `PUT /flows/{id}`                                   | Create or update a flow (and its source)                  |
+| `GET /flows`                                        | List flows                                                |
+| `GET /flows/{id}`                                   | Get a flow                                                |
+| `DELETE /flows/{id}`                                | Delete a flow and its segments                            |
+| `GET /sources`                                      | List sources                                              |
+| `POST /flows/{id}/storage`                          | Allocate storage and get presigned PUT URLs               |
+| `POST /flows/{id}/segments`                         | Register a segment for a flow                             |
+| `GET /flows/{id}/segments?timerange=[start_end)`    | List a flow's segments, optionally filtered by range      |
+| `DELETE /flows/{id}/segments?timerange=[start_end)` | Delete segments completely covered by the timerange       |
+| `GET /flow-delete-requests`                         | List flow segment deletion requests                       |
+| `GET /flow-delete-requests/{requestId}`             | Get a deletion request                                    |
+| `GET /flows/{id}/output.m3u8?type=live\|vod`        | Playable HLS media playlist for a flow's TS segments      |
+| `GET /service`                                      | Service descriptor (advertises supported event streams)   |
+| `POST /service/webhooks`                            | Register a webhook for event notifications                |
+| `GET /service/webhooks`                             | List registered webhooks                                  |
+| `GET /service/webhooks/{webhookId}`                 | Get a webhook                                             |
+| `PUT /service/webhooks/{webhookId}`                 | Update a webhook                                          |
+| `DELETE /service/webhooks/{webhookId}`              | Delete a webhook                                          |
 
 Segments are time-addressed using the TAMS timerange format
 `[<seconds>:<nanoseconds>_<seconds>:<nanoseconds>)` (TAI). On startup the
@@ -148,10 +151,10 @@ notifications). Register a webhook with `POST /service/webhooks`:
 The gateway then POSTs a JSON body `{ event_timestamp, event_type, event }` to the
 registered `url` for each subscribed event, setting the `api_key_name` header to
 `api_key_value` when both are given. Supported event types: `flows/created`,
-`flows/updated`, `flows/deleted`, `flows/segments_added`, `sources/created`,
-`sources/updated` (and `flows/segments_deleted`, `sources/deleted` once their
-triggering operations land). Delivery can be scoped with the `flow_ids` /
-`source_ids` filters. The `api_key_value` secret is stored but never returned by
+`flows/updated`, `flows/deleted`, `flows/segments_added`,
+`flows/segments_deleted`, `sources/created`, `sources/updated` (and
+`sources/deleted` once source deletion lands). Delivery can be scoped with the
+`flow_ids` / `source_ids` filters. The `api_key_value` secret is stored but never returned by
 any `GET`. Whether webhooks are supported is advertised in
 `event_stream_mechanisms` on `GET /service`.
 

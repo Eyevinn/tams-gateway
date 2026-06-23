@@ -16,6 +16,9 @@ import listSources from './endpoints/sources/listSources';
 import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
+import deleteSegments from './endpoints/segments/deleteSegments';
+import listDeletionRequests from './endpoints/deletion-requests/listDeletionRequests';
+import getDeletionRequest from './endpoints/deletion-requests/getDeletionRequest';
 import getHlsPlaylist from './endpoints/output/getHlsPlaylist';
 import getService from './endpoints/service/getService';
 import postWebhook from './endpoints/webhooks/postWebhook';
@@ -95,6 +98,10 @@ export default (opts: ApiOptions) => {
         {
           name: 'Webhooks',
           description: 'Register and manage event-notification webhooks'
+        },
+        {
+          name: 'Flow Delete Requests',
+          description: 'Monitor flow segment deletion requests'
         }
       ]
     }
@@ -116,6 +123,9 @@ export default (opts: ApiOptions) => {
   api.register(postStorage);
   api.register(postSegments);
   api.register(listSegments);
+  api.register(deleteSegments);
+  api.register(listDeletionRequests);
+  api.register(getDeletionRequest);
 
   api.register(getHlsPlaylist);
 

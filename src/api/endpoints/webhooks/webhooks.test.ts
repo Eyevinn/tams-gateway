@@ -180,7 +180,7 @@ describe('putWebhook', () => {
       method: 'PUT',
       url: '/service/webhooks/wh-1',
       payload: {
-        id: 'wh-1',
+        id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
         url: 'https://new.example.com',
         events: ['flows/created', 'flows/deleted'],
         status: 'created'
@@ -206,7 +206,7 @@ describe('putWebhook', () => {
       method: 'PUT',
       url: '/service/webhooks/missing',
       payload: {
-        id: 'missing',
+        id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
         url: 'https://new.example.com',
         events: ['flows/created'],
         status: 'created'
@@ -233,7 +233,7 @@ describe('putWebhook', () => {
       method: 'PUT',
       url: '/service/webhooks/wh-1',
       payload: {
-        id: 'wh-1',
+        id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
         url: 'https://hook.example.com',
         events: ['flows/created'],
         status: 'disabled'
