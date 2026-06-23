@@ -1,7 +1,10 @@
 [
   "DELETE /flows/{}",
+  "DELETE /flows/{}/segments",
   "DELETE /service/webhooks/{}",
   "GET /",
+  "GET /flow-delete-requests",
+  "GET /flow-delete-requests/{}",
   "GET /flows",
   "GET /flows/{}",
   "GET /flows/{}/segments",
