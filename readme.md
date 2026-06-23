@@ -45,8 +45,9 @@ Optional variables: `PORT` (default `8000`), `AWS_REGION` (default
 `ENABLE_UI` (default `true`, serves the inspector UI at `/ui`), `HLS_URL_TTL`
 (default `21600`, presigned segment-URL lifetime in seconds for HLS output),
 `LIVE_RECENCY_WINDOW` (default `30`, seconds within which the latest segment marks
-a flow live) and `LIVE_WINDOW_SEC` (default `300`, span in seconds of the live
-HLS playlist DVR window ending at the live edge).
+a flow live), `LIVE_WINDOW_SEC` (default `300`, span in seconds of the live
+HLS playlist DVR window ending at the live edge) and `WEBHOOK_TIMEOUT_MS` (default
+`5000`, per-webhook delivery timeout in milliseconds for outbound event POSTs).
 
 If you are using the couchDB and Minio services from OSC then this file will look like:
 
@@ -96,6 +97,12 @@ The gateway exposes the TAMS resources:
 | `POST /flows/{id}/segments`                      | Register a segment for a flow                             |
 | `GET /flows/{id}/segments?timerange=[start_end)` | List a flow's segments, optionally filtered by range      |
 | `GET /flows/{id}/output.m3u8?type=live\|vod`     | Playable HLS media playlist for a flow's TS segments      |
+| `GET /service`                                   | Service descriptor (advertises supported event streams)   |
+| `POST /service/webhooks`                         | Register a webhook for event notifications                |
+| `GET /service/webhooks`                          | List registered webhooks                                  |
+| `GET /service/webhooks/{webhookId}`              | Get a webhook                                             |
+| `PUT /service/webhooks/{webhookId}`              | Update a webhook                                          |
+| `DELETE /service/webhooks/{webhookId}`           | Delete a webhook                                          |
 
 Segments are time-addressed using the TAMS timerange format
 `[<seconds>:<nanoseconds>_<seconds>:<nanoseconds>)` (TAI). On startup the
@@ -118,6 +125,35 @@ URLs served straight from the store.
 Only MPEG-TS (H.264/AAC) flows are playable; others return `415`. Browser playback
 also needs a CORS policy on the object store allowing `GET` + `Range` from the
 player origin.
+
+## Webhooks (event notifications)
+
+The gateway can notify external services of changes via webhooks (TAMS event
+notifications). Register a webhook with `POST /service/webhooks`:
+
+```json
+{
+  "url": "https://hook.example.com",
+  "api_key_name": "Authorization",
+  "api_key_value": "Bearer <token>",
+  "events": ["flows/created", "flows/segments_added"]
+}
+```
+
+The gateway then POSTs a JSON body `{ event_timestamp, event_type, event }` to the
+registered `url` for each subscribed event, setting the `api_key_name` header to
+`api_key_value` when both are given. Supported event types: `flows/created`,
+`flows/updated`, `flows/deleted`, `flows/segments_added`, `sources/created`,
+`sources/updated` (and `flows/segments_deleted`, `sources/deleted` once their
+triggering operations land). Delivery can be scoped with the `flow_ids` /
+`source_ids` filters. The `api_key_value` secret is stored but never returned by
+any `GET`. Whether webhooks are supported is advertised in
+`event_stream_mechanisms` on `GET /service`.
+
+Delivery is best-effort with a per-webhook timeout (`WEBHOOK_TIMEOUT_MS`); a slow
+or failing subscriber never blocks or fails the API request that triggered the
+event. As a basic SSRF mitigation, delivery to non-HTTP(S) URLs and the cloud
+metadata address is refused.
 
 ## Inspector UI
 

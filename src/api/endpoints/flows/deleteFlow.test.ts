@@ -4,7 +4,9 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 vi.mock('../../../db/client', () => ({
   flowsClient: { get: vi.fn(), destroy: vi.fn() },
-  segmentsClient: { find: vi.fn(), bulk: vi.fn() }
+  segmentsClient: { find: vi.fn(), bulk: vi.fn() },
+  // notifyWebhooks queries this; no subscribers in these tests.
+  webhooksClient: { find: vi.fn().mockResolvedValue({ docs: [] }) }
 }));
 vi.mock('../../utils/deleteS3Objects', () => ({
   __esModule: true,

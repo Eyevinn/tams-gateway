@@ -4,6 +4,7 @@ import Segment from '../../../db/schemas/segments/Segment';
 import { segmentsClient } from '../../../db/client';
 import { segmentKeys } from '../../utils/timerange';
 import getOrUndefined from '../../../db/getOrUndefined';
+import notifyWebhooks from '../../utils/notifyWebhooks';
 
 // A single segment or an array of segments, per the TAMS spec.
 const PostSegmentsBody = Type.Union([Segment, Type.Array(Segment)]);
@@ -58,6 +59,8 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
     const segments = Array.isArray(body) ? body : [body];
 
     const failed: Static<typeof FailedSegments>['failed_segments'] = [];
+    // Successfully registered segments, emitted in the flows/segments_added event.
+    const registered: Static<typeof Segment>[] = [];
 
     for (const entry of segments) {
       // get_urls are presigned on read, never stored (dropped here).
@@ -78,6 +81,7 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
           ts_start: tsStart,
           ts_end: tsEnd
         });
+        registered.push(segment);
       } catch (err) {
         failed.push({
           object_id: segment.object_id,
@@ -89,6 +93,16 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
           }
         });
       }
+    }
+
+    // Emit the segments-added notification for the segments that registered
+    // (never throws). Skip when none succeeded.
+    if (registered.length > 0) {
+      await notifyWebhooks(
+        'flows/segments_added',
+        { flow_id: id, segments: registered },
+        { flowId: id }
+      );
     }
 
     if (failed.length > 0) {

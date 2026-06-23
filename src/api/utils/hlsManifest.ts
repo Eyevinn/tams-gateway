@@ -30,10 +30,17 @@ export interface HlsBuildInput {
 const extinfSeconds = (segment: HlsSegment): number =>
   Number(BigInt(segment.ts_end) - BigInt(segment.ts_start)) / 1e9;
 
-// PROGRAM-DATE-TIME from ts_start: convert ns -> ms (BigInt) then to a JS Date.
-// TAI-vs-UTC ~37s offset is accepted for Phase 1 (relative scrub alignment).
+// PROGRAM-DATE-TIME is the segment's civil wall-clock time. TAMS ts_start is TAI
+// nanoseconds; TAI runs 37s ahead of UTC (constant since 2017, no leap seconds
+// since), so subtract that offset to emit real UTC. Emitting raw TAI-as-UTC put
+// every PDT ~37s in the FUTURE, which is wrong per the HLS spec (PDT is the
+// segment's wall-clock time) and skews any player/tool that maps PDT to
+// wall-clock: live-edge placement, latency, scrubbing, discontinuity alignment.
+const TAI_UTC_OFFSET_MS = 37_000;
 const programDateTime = (segment: HlsSegment): string =>
-  new Date(Number(BigInt(segment.ts_start) / NS_PER_MS)).toISOString();
+  new Date(
+    Number(BigInt(segment.ts_start) / NS_PER_MS) - TAI_UTC_OFFSET_MS
+  ).toISOString();
 
 export function buildMediaPlaylist(input: HlsBuildInput): string {
   const { isLive, mediaSequence, segments } = input;

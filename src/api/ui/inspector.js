@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #22';
+  var BUILD = 'build 2026-06-23 #23';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -900,9 +900,11 @@
 
     // Tick the wall-clock readout on a timer (independent of "timeupdate", so it
     // reflects seeks immediately). getDate() returns the playhead's program time
-    // (TAI) for the segment ON SCREEN, or null. We render civil local time so it
-    // matches the burnt-in feed timecode, and show "—" until the playhead time is
-    // known rather than ever displaying a guessed (wrong) value.
+    // (PROGRAM-DATE-TIME) for the segment ON SCREEN, or null. The manifest now
+    // emits PDT in civil UTC (the gateway subtracts the TAI offset), so we render
+    // it directly. The raw-ns paths (segment table, navigator) still convert TAI
+    // with TAI_UTC_OFFSET_MS; only the manifest-PDT clock changed. Show "—" until
+    // the playhead time is known rather than ever displaying a guessed value.
     function isValidDate(d) {
       return d && typeof d.getTime === 'function' && !isNaN(d.getTime());
     }
@@ -915,7 +917,7 @@
             clock.textContent = '—';
             return;
           }
-          var civil = new Date(d.getTime() - TAI_UTC_OFFSET_MS);
+          var civil = d;
           clock.textContent =
             civil.toLocaleTimeString() +
             '  ·  ' +

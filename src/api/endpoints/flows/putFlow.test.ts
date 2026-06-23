@@ -4,7 +4,9 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 vi.mock('../../../db/client', () => ({
   flowsClient: { get: vi.fn(), insert: vi.fn() },
-  sourcesClient: { get: vi.fn(), insert: vi.fn() }
+  sourcesClient: { get: vi.fn(), insert: vi.fn() },
+  // notifyWebhooks queries this; no subscribers in these tests.
+  webhooksClient: { find: vi.fn().mockResolvedValue({ docs: [] }) }
 }));
 
 import { flowsClient, sourcesClient } from '../../../db/client';

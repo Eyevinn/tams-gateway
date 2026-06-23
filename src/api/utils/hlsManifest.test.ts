@@ -92,8 +92,9 @@ describe('buildMediaPlaylist', () => {
     expect(live).not.toContain('#EXTINF');
   });
 
-  it('formats PROGRAM-DATE-TIME as an ISO 8601 string from ts_start', () => {
-    // 1_700_000_000 s = 2023-11-14T22:13:20.000Z.
+  it('formats PROGRAM-DATE-TIME as civil UTC (TAI ts_start minus the 37s offset)', () => {
+    // 1_700_000_000 s TAI = 2023-11-14T22:13:20.000Z as raw TAI; civil UTC is
+    // 37s earlier => 2023-11-14T22:12:43.000Z.
     const ts_start = (1_700_000_000n * 1_000_000_000n)
       .toString()
       .padStart(20, '0');
@@ -105,7 +106,7 @@ describe('buildMediaPlaylist', () => {
       mediaSequence: 0,
       segments: [{ ts_start, ts_end, uri: 'https://s3/seg.ts' }]
     });
-    expect(m3u8).toContain('#EXT-X-PROGRAM-DATE-TIME:2023-11-14T22:13:20.000Z');
+    expect(m3u8).toContain('#EXT-X-PROGRAM-DATE-TIME:2023-11-14T22:12:43.000Z');
   });
 
   it('sets TARGETDURATION to ceil(max EXTINF)', () => {
