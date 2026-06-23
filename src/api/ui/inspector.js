@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #23';
+  var BUILD = 'build 2026-06-23 #24';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -961,7 +961,13 @@
       // restores the standard targetduration-paced reload. hls.js still detects
       // live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength keeps the
       // live DVR window buffered so -10s jumps have data to seek to.
+      // ?debug=1 in the URL turns on hls.js verbose logging (and exposes the
+      // instance as window.__hls) so the live player's reload behaviour can be
+      // inspected in the console without a rebuild.
+      var hlsDebug =
+        new URLSearchParams(window.location.search).get('debug') === '1';
       var hls = new Hls({
+        debug: hlsDebug,
         lowLatencyMode: false,
         backBufferLength: 300,
         // Bound live-playlist reload retries so a transient backend error (e.g.
@@ -987,6 +993,7 @@
         }
       });
       currentHls = hls;
+      if (hlsDebug) window.__hls = hls;
       // Playhead wall-clock. Track the fragment ACTUALLY ON SCREEN (FRAG_CHANGED)
       // and use ITS own PROGRAM-DATE-TIME plus only the offset WITHIN that segment.
       // This is immune to discontinuities: across a producer-off gap, media
