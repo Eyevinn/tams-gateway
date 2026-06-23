@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #25';
+  var BUILD = 'build 2026-06-23 #26';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -935,6 +935,19 @@
     function playNative() {
       video.src = src;
       playStatus.textContent = 'Native HLS playback.';
+      // Visible disclaimer: native HLS is the browser's own client, which we do
+      // not control. It can misbehave on live (e.g. re-polling the manifest many
+      // times per second). hls.js is preferred; this is a best-effort fallback.
+      if (video.parentNode) {
+        video.parentNode.appendChild(
+          notice(
+            'cant-play',
+            'Your browser is using its built-in HLS player (the hls.js engine ' +
+              'is not available here). Playback is best-effort and not ' +
+              'guaranteed; live streams in particular may behave incorrectly.'
+          )
+        );
+      }
       wireClock(function () {
         var d = playheadFromParse();
         if (d) return d;
