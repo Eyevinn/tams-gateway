@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #24';
+  var BUILD = 'build 2026-06-23 #25';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -842,8 +842,11 @@
     }
   }
 
-  // Lazy-load the vendored hls.js only here (ADR-007 D2). Native HLS (Safari)
-  // skips the library entirely.
+  // Lazy-load the vendored hls.js only here (ADR-007 D2). We PREFER hls.js
+  // whenever it is supported and fall back to the browser's native HLS only when
+  // it is not (e.g. iOS Safari, which has no MSE). Native is the fallback, not
+  // the default: a browser's built-in HLS client re-polls our live playlist many
+  // times per second, while hls.js reloads it about once per target-duration.
   function attachPlayer(video, src, mode, playStatus, clock) {
     function fail(msg) {
       playStatus.textContent = msg;
@@ -926,9 +929,10 @@
       );
     }
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari / native HLS. getStartDate() is the EXT-X-PROGRAM-DATE-TIME of
-      // the playlist start; the playhead clock is that plus currentTime.
+    // Native HLS playback, used ONLY as a fallback when hls.js cannot run.
+    // getStartDate() is the EXT-X-PROGRAM-DATE-TIME of the playlist start; the
+    // playhead clock is that plus currentTime.
+    function playNative() {
       video.src = src;
       playStatus.textContent = 'Native HLS playback.';
       wireClock(function () {
@@ -938,8 +942,9 @@
         if (!start || isNaN(start.getTime())) return null;
         return new Date(start.getTime() + video.currentTime * 1000);
       });
-      return;
     }
+
+    var canNative = !!video.canPlayType('application/vnd.apple.mpegurl');
 
     playStatus.innerHTML =
       '<span class="spinner" aria-hidden="true"></span>Loading player…';
@@ -949,7 +954,12 @@
     script.onload = function () {
       var Hls = window.Hls;
       if (!Hls || !Hls.isSupported()) {
-        fail('This browser cannot play HLS.');
+        // hls.js unsupported (e.g. iOS Safari, no MSE): fall back to native HLS.
+        if (canNative) {
+          playNative();
+        } else {
+          fail('This browser cannot play HLS.');
+        }
         return;
       }
       // lowLatencyMode MUST be set false explicitly: hls.js defaults it to TRUE
@@ -1115,7 +1125,12 @@
       hls.attachMedia(video);
     };
     script.onerror = function () {
-      fail('Could not load the bundled HLS player.');
+      // Could not load hls.js: fall back to native HLS if the browser has it.
+      if (canNative) {
+        playNative();
+      } else {
+        fail('Could not load the bundled HLS player.');
+      }
     };
     document.body.appendChild(script);
   }
