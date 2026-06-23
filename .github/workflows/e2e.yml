@@ -20,7 +20,7 @@ jobs:
       API_TOKEN: e2e-token
       PORT: '8000'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - name: Use Node.js
         uses: actions/setup-node@v6
