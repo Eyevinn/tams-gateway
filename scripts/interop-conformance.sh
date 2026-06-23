@@ -74,6 +74,11 @@ NONSCHEMA_CHECKS="not_a_server_error,status_code_conformance,content_type_confor
 # which keep all checks. The param name is matched generically.
 FLOW_RESOURCE_REGEX='^/flows(/\{[^/]+\})?$'
 
+# filter_too_much is a Hypothesis data-generation health check (it fires when a
+# vendored schema, e.g. flow_collection's CollectionItem/container_mapping, is
+# costly to generate valid data for). It is orthogonal to response conformance,
+# the examples that ARE generated still run every --checks, so suppress it rather
+# than let a generation-efficiency warning fail an otherwise-passing operation.
 run_schemathesis() {
   docker run --rm --network host \
     -e PYTHON_GIL=1 \
@@ -83,6 +88,7 @@ run_schemathesis() {
     --phases examples,fuzzing \
     --max-examples "$MAX_EXAMPLES" \
     --continue-on-failure \
+    --suppress-health-check=filter_too_much \
     "$@" \
     ${headers[@]+"${headers[@]}"}
 }
