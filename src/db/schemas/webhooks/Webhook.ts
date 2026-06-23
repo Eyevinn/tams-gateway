@@ -19,6 +19,14 @@ const WebhookEvent = Type.Union(
   WEBHOOK_EVENTS.map((event) => Type.Literal(event))
 );
 
+// UUID (uuid.json). The filter id lists and the webhook id MUST be UUIDs;
+// accepting arbitrary strings let invalid ids (e.g. "") be stored and echoed
+// back, violating the spec's uuid pattern on read.
+const Uuid = Type.String({
+  pattern:
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+});
+
 // Full lifecycle status (webhook-get.json).
 const WebhookStatus = Type.Union([
   Type.Literal('created'),
@@ -48,12 +56,13 @@ const WebhookBase = Type.Object({
   url: Type.String(),
   api_key_name: Type.Optional(Type.String()),
   events: Type.Array(WebhookEvent),
-  flow_ids: Type.Optional(Type.Array(Type.String())),
-  source_ids: Type.Optional(Type.Array(Type.String())),
-  flow_collected_by_ids: Type.Optional(Type.Array(Type.String())),
-  source_collected_by_ids: Type.Optional(Type.Array(Type.String())),
+  flow_ids: Type.Optional(Type.Array(Uuid)),
+  source_ids: Type.Optional(Type.Array(Uuid)),
+  flow_collected_by_ids: Type.Optional(Type.Array(Uuid)),
+  source_collected_by_ids: Type.Optional(Type.Array(Uuid)),
+  // accept_get_urls are URL labels, not UUIDs.
   accept_get_urls: Type.Optional(Type.Array(Type.String())),
-  accept_storage_ids: Type.Optional(Type.Array(Type.String())),
+  accept_storage_ids: Type.Optional(Type.Array(Uuid)),
   presigned: Type.Optional(Type.Boolean()),
   verbose_storage: Type.Optional(Type.Boolean()),
   tags: Type.Optional(Type.Record(Type.String(), Type.String()))
@@ -72,7 +81,7 @@ export const WebhookPost = Type.Intersect([
 export const WebhookPut = Type.Intersect([
   WebhookBase,
   Type.Object({
-    id: Type.String(),
+    id: Uuid,
     api_key_value: Type.Optional(Type.String()),
     status: WebhookInputStatus
   })
@@ -83,7 +92,7 @@ export const WebhookPut = Type.Intersect([
 export const WebhookGet = Type.Intersect([
   WebhookBase,
   Type.Object({
-    id: Type.String(),
+    id: Uuid,
     status: WebhookStatus,
     error: Type.Optional(WebhookError)
   })
