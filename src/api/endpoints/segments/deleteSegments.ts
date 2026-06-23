@@ -72,24 +72,25 @@ const deleteSegments: FastifyPluginCallback = (fastify, _, next) => {
       throw httpError(403, `Flow "${id}" is read-only`);
     }
 
-    // (3) Containment selector. An unparseable timerange is a client error.
-    let range;
+    // (3) Containment selector. An unparseable timerange (or one whose bounds
+    // exceed the key width) is a client error, not a 500. toKey is inside the
+    // try because it throws on an out-of-range timestamp.
+    const selector: MangoSelector = { flow_id: id };
     try {
-      range = parseTimeRange(timerange);
+      const range = parseTimeRange(timerange);
+      if (range.start !== null) {
+        // Segment must START at/after the query start (strict if exclusive).
+        selector.ts_start = {
+          [range.startInclusive ? '$gte' : '$gt']: toKey(range.start)
+        };
+      }
+      if (range.end !== null) {
+        // Segment's exclusive END must be at/before the query end: [x, ts_end)
+        // is contained in the query range when ts_end <= query end.
+        selector.ts_end = { $lte: toKey(range.end) };
+      }
     } catch {
       throw httpError(400, `Invalid timerange "${timerange}"`);
-    }
-    const selector: MangoSelector = { flow_id: id };
-    if (range.start !== null) {
-      // Segment must START at/after the query start (strict if start exclusive).
-      selector.ts_start = {
-        [range.startInclusive ? '$gte' : '$gt']: toKey(range.start)
-      };
-    }
-    if (range.end !== null) {
-      // Segment's exclusive END must be at/before the query end: [x, ts_end) is
-      // contained in the query range when ts_end <= query end.
-      selector.ts_end = { $lte: toKey(range.end) };
     }
     if (object_id) {
       selector.object_id = object_id;
