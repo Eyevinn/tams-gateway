@@ -13,6 +13,7 @@ import listFlows from './endpoints/flows/listFlows';
 import getFlow from './endpoints/flows/getFlow';
 import deleteFlow from './endpoints/flows/deleteFlow';
 import listSources from './endpoints/sources/listSources';
+import getSource from './endpoints/sources/getSource';
 import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
@@ -27,6 +28,13 @@ import getWebhook from './endpoints/webhooks/getWebhook';
 import putWebhook from './endpoints/webhooks/putWebhook';
 import deleteWebhook from './endpoints/webhooks/deleteWebhook';
 import ui from './endpoints/ui/ui';
+import { Type } from '@sinclair/typebox';
+import { flowsClient, sourcesClient } from '../db/client';
+import propertyEndpoints, {
+  PropertyClient
+} from './endpoints/properties/propertyEndpoints';
+import tagsEndpoints from './endpoints/properties/tagsEndpoints';
+import CollectionItem from '../db/schemas/common/CollectionItem';
 import { DEFAULT_ENABLE_UI, DEFAULT_LOG_LEVEL } from '../config';
 
 // All runtime configuration the API needs is passed in by the caller (see
@@ -119,6 +127,117 @@ export default (opts: ApiOptions) => {
   api.register(deleteFlow);
 
   api.register(listSources);
+  api.register(getSource);
+
+  // Flow and source property + tag endpoints (TAMS /<resource>/{id}/<prop> and
+  // /<resource>/{id}/tags[/{name}]), generated from a shared factory. The
+  // clients are cast to the factory's loose document type. read_only is
+  // flow-only, has no DELETE, and is NOT read-only-guarded (it must stay
+  // settable to unlock a flow). Sources have no read_only, so their writes are
+  // unguarded.
+  const flowClient = flowsClient as unknown as PropertyClient;
+  const sourceClient = sourcesClient as unknown as PropertyClient;
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'description',
+      valueSchema: Type.String()
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'label',
+      valueSchema: Type.String()
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'read_only',
+      valueSchema: Type.Boolean(),
+      allowDelete: false,
+      guardReadOnly: false
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'max_bit_rate',
+      valueSchema: Type.Integer()
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'avg_bit_rate',
+      valueSchema: Type.Integer()
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows',
+      field: 'flow_collection',
+      valueSchema: Type.Array(CollectionItem)
+    })
+  );
+  api.register(
+    tagsEndpoints({
+      client: flowClient,
+      basePath: '/flows/:id',
+      resourceName: 'Flow',
+      tag: 'Flows'
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: sourceClient,
+      basePath: '/sources/:id',
+      resourceName: 'Source',
+      tag: 'Sources',
+      field: 'description',
+      valueSchema: Type.String(),
+      guardReadOnly: false
+    })
+  );
+  api.register(
+    propertyEndpoints({
+      client: sourceClient,
+      basePath: '/sources/:id',
+      resourceName: 'Source',
+      tag: 'Sources',
+      field: 'label',
+      valueSchema: Type.String(),
+      guardReadOnly: false
+    })
+  );
+  api.register(
+    tagsEndpoints({
+      client: sourceClient,
+      basePath: '/sources/:id',
+      resourceName: 'Source',
+      tag: 'Sources',
+      guardReadOnly: false
+    })
+  );
 
   api.register(postStorage);
   api.register(postSegments);
