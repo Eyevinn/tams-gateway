@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #21';
+  var BUILD = 'build 2026-06-23 #22';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -950,12 +950,17 @@
         fail('This browser cannot play HLS.');
         return;
       }
-      // lowLatencyMode stays OFF (default): our live playlist is plain HLS (no
-      // EXT-X-PART / SERVER-CONTROL), so LL-HLS mode would block waiting for parts
-      // that never arrive (the "live won't start, no error" symptom). hls.js
-      // detects live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength
-      // keeps the live DVR window buffered so -10s jumps have data to seek to.
+      // lowLatencyMode MUST be set false explicitly: hls.js defaults it to TRUE
+      // (https://github.com/video-dev/hls.js/blob/master/docs/API.md). Our live
+      // playlist is plain HLS (no EXT-X-PART / SERVER-CONTROL / PART-HOLD-BACK),
+      // so with LL mode on hls.js polls the media playlist for parts that never
+      // arrive and reloads it many times per target-duration (observed ~7 req/s,
+      // ~126ms apart, all 200) instead of about once per segment. Turning it off
+      // restores the standard targetduration-paced reload. hls.js still detects
+      // live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength keeps the
+      // live DVR window buffered so -10s jumps have data to seek to.
       var hls = new Hls({
+        lowLatencyMode: false,
         backBufferLength: 300,
         // Bound live-playlist reload retries so a transient backend error (e.g.
         // a 503 from the metadata store on a ?type=live reload) backs off
