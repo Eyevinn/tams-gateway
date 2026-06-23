@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-22 #20';
+  var BUILD = 'build 2026-06-23 #21';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -80,7 +80,28 @@
     return node;
   }
 
+  // Active hls.js instance + interval timers for the flow-detail player. The
+  // player view is rebuilt on every navigation; without explicit teardown the
+  // previous hls.js instance keeps its live-manifest reload loop running and the
+  // clock/seekbar intervals keep ticking (detached from the cleared DOM), so
+  // re-renders leak loops that compound into a live-manifest request storm.
+  // teardownPlayer() is called from clearView() before each render.
+  var currentHls = null;
+  var playerTimers = [];
+  function teardownPlayer() {
+    if (currentHls) {
+      try {
+        currentHls.destroy();
+      } catch (e) {
+        /* already gone */
+      }
+      currentHls = null;
+    }
+    while (playerTimers.length) clearInterval(playerTimers.pop());
+  }
+
   function clearView() {
+    teardownPlayer();
     viewEl.innerHTML = '';
     mountTarget = viewEl;
   }
@@ -736,11 +757,13 @@
       scrub.active = false;
     });
     // Keep the bar in sync with playback (skip while the user is dragging).
-    setInterval(function () {
-      var max = seekMax();
-      if (max > 0) seekbar.max = String(max);
-      if (!scrub.active) seekbar.value = String(video.currentTime || 0);
-    }, 250);
+    playerTimers.push(
+      setInterval(function () {
+        var max = seekMax();
+        if (max > 0) seekbar.max = String(max);
+        if (!scrub.active) seekbar.value = String(video.currentTime || 0);
+      }, 250)
+    );
 
     // Several jump sizes plus a jump to the latest available position.
     function jumpBtn(label, delta) {
@@ -885,18 +908,20 @@
     }
     function wireClock(getDate) {
       if (!clock) return;
-      setInterval(function () {
-        var d = getDate();
-        if (!isValidDate(d)) {
-          clock.textContent = '—';
-          return;
-        }
-        var civil = new Date(d.getTime() - TAI_UTC_OFFSET_MS);
-        clock.textContent =
-          civil.toLocaleTimeString() +
-          '  ·  ' +
-          behindLabel(Date.now() - civil.getTime());
-      }, 500);
+      playerTimers.push(
+        setInterval(function () {
+          var d = getDate();
+          if (!isValidDate(d)) {
+            clock.textContent = '—';
+            return;
+          }
+          var civil = new Date(d.getTime() - TAI_UTC_OFFSET_MS);
+          clock.textContent =
+            civil.toLocaleTimeString() +
+            '  ·  ' +
+            behindLabel(Date.now() - civil.getTime());
+        }, 500)
+      );
     }
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -930,7 +955,31 @@
       // that never arrive (the "live won't start, no error" symptom). hls.js
       // detects live vs VOD from the absence of EXT-X-ENDLIST. backBufferLength
       // keeps the live DVR window buffered so -10s jumps have data to seek to.
-      var hls = new Hls({ backBufferLength: 300 });
+      var hls = new Hls({
+        backBufferLength: 300,
+        // Bound live-playlist reload retries so a transient backend error (e.g.
+        // a 503 from the metadata store on a ?type=live reload) backs off
+        // instead of becoming a request storm. Without an explicit policy a
+        // sustained error turns the live reload into a tight retry loop.
+        playlistLoadPolicy: {
+          default: {
+            maxTimeToFirstByteMs: 10000,
+            maxLoadTimeMs: 20000,
+            timeoutRetry: {
+              maxNumRetry: 2,
+              retryDelayMs: 0,
+              maxRetryDelayMs: 0
+            },
+            errorRetry: {
+              maxNumRetry: 4,
+              retryDelayMs: 1000,
+              maxRetryDelayMs: 8000,
+              backoff: 'exponential'
+            }
+          }
+        }
+      });
+      currentHls = hls;
       // Playhead wall-clock. Track the fragment ACTUALLY ON SCREEN (FRAG_CHANGED)
       // and use ITS own PROGRAM-DATE-TIME plus only the offset WITHIN that segment.
       // This is immune to discontinuities: across a producer-off gap, media
@@ -938,8 +987,16 @@
       // currentTime drifts behind by the total gap length (the old bug). Each
       // segment's own programDateTime already carries the correct wall-clock.
       var playingFrag = null;
+      // Bounded recovery budget for fatal network errors (see the ERROR handler).
+      var netBackoffMs = 0;
+      var netRetries = 0;
+      var MAX_NET_RETRIES = 3;
       hls.on(Hls.Events.FRAG_CHANGED, function (_e, data) {
         playingFrag = data && data.frag ? data.frag : null;
+        // A fragment played: the stream recovered, so reset the error backoff
+        // budget for any future transient failure.
+        netRetries = 0;
+        netBackoffMs = 0;
       });
       wireClock(function () {
         var d = playheadFromParse();
@@ -991,8 +1048,47 @@
             playStatus.textContent = 'Press play to start playback.';
           });
       });
+      // Non-fatal errors (e.g. a single failed live-manifest reload) are handled
+      // by the playlistLoadPolicy backoff above. Only act on fatal errors here,
+      // and always stop the load loop first so hls.js does not keep retrying in
+      // the background: the old handler set a message but left the loop running,
+      // which under a sustained backend error read as request "hammering".
       hls.on(Hls.Events.ERROR, function (_evt, data) {
-        if (data && data.fatal) {
+        if (!data || !data.fatal) return;
+        try {
+          hls.stopLoad();
+        } catch (e) {
+          /* already stopped */
+        }
+        if (
+          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          netRetries < MAX_NET_RETRIES
+        ) {
+          // One bounded, backed-off recovery attempt instead of a tight loop.
+          netRetries++;
+          netBackoffMs = Math.min(
+            netBackoffMs ? netBackoffMs * 2 : 2000,
+            30000
+          );
+          fail(
+            'Stream temporarily unavailable. Retrying in ' +
+              Math.round(netBackoffMs / 1000) +
+              's… (' +
+              netRetries +
+              '/' +
+              MAX_NET_RETRIES +
+              ')'
+          );
+          setTimeout(function () {
+            try {
+              hls.startLoad();
+            } catch (e) {
+              /* destroyed */
+            }
+          }, netBackoffMs);
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else {
           fail(
             'Playback error (' +
               (data.type || 'unknown') +
