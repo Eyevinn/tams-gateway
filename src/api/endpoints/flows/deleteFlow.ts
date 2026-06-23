@@ -5,6 +5,7 @@ import { Flow } from '../../../db/schemas/flows/Flow';
 import ErrorResponse from '../../utils/error-response';
 import deleteS3Objects from '../../utils/deleteS3Objects';
 import Logger from '../../../utils/Logger';
+import notifyWebhooks from '../../utils/notifyWebhooks';
 
 const opts = {
   schema: {
@@ -48,6 +49,9 @@ const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
     const { id } = request.params;
     const DBFlow = await flowsClient.get(id);
     await flowsClient.destroy(DBFlow._id, DBFlow._rev);
+
+    // Emit the flow-deleted notification (never throws).
+    await notifyWebhooks('flows/deleted', { flow_id: id }, { flowId: id });
 
     // Collect the flow's segments, keeping object_id so the underlying media
     // objects can be reclaimed after the segment docs are removed.

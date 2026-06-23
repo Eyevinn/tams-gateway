@@ -17,6 +17,12 @@ import postStorage from './endpoints/storage/postStorage';
 import postSegments from './endpoints/segments/postSegments';
 import listSegments from './endpoints/segments/listSegments';
 import getHlsPlaylist from './endpoints/output/getHlsPlaylist';
+import getService from './endpoints/service/getService';
+import postWebhook from './endpoints/webhooks/postWebhook';
+import listWebhooks from './endpoints/webhooks/listWebhooks';
+import getWebhook from './endpoints/webhooks/getWebhook';
+import putWebhook from './endpoints/webhooks/putWebhook';
+import deleteWebhook from './endpoints/webhooks/deleteWebhook';
 import ui from './endpoints/ui/ui';
 import { DEFAULT_ENABLE_UI, DEFAULT_LOG_LEVEL } from '../config';
 
@@ -81,6 +87,14 @@ export default (opts: ApiOptions) => {
         {
           name: 'Output',
           description: 'Playable HLS output'
+        },
+        {
+          name: 'Service',
+          description: 'Service descriptor'
+        },
+        {
+          name: 'Webhooks',
+          description: 'Register and manage event-notification webhooks'
         }
       ]
     }
@@ -104,6 +118,13 @@ export default (opts: ApiOptions) => {
   api.register(listSegments);
 
   api.register(getHlsPlaylist);
+
+  api.register(getService);
+  api.register(postWebhook);
+  api.register(listWebhooks);
+  api.register(getWebhook);
+  api.register(putWebhook);
+  api.register(deleteWebhook);
 
   // Built-in read-only inspector UI (ADR-007). Registered only when enabled, so
   // the lean conformance API runs without the static handler or /ui route.

@@ -7,7 +7,9 @@ vi.mock('../../../db/client', () => ({
     get: vi.fn(),
     insert: vi.fn(),
     find: vi.fn()
-  }
+  },
+  // notifyWebhooks queries this; no subscribers in these tests.
+  webhooksClient: { find: vi.fn().mockResolvedValue({ docs: [] }) }
 }));
 vi.mock('../../utils/createS3URL', () => ({
   __esModule: true,

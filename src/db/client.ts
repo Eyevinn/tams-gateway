@@ -4,6 +4,7 @@ import Logger from '../utils/Logger';
 import { Static } from '@sinclair/typebox';
 import { DBSource } from './schemas/sources/Source';
 import { DBSegment } from './schemas/segments/Segments';
+import { DBWebhook } from './schemas/webhooks/Webhook';
 
 const url = new URL(process.env.DB_URL || 'http://localhost:8000');
 url.username = process.env.DB_USERNAME || '';
@@ -14,6 +15,8 @@ const sourcesClient: DocumentScope<Static<typeof DBSource>> =
   client.use('sources');
 const segmentsClient: DocumentScope<Static<typeof DBSegment>> =
   client.use('segments');
+const webhooksClient: DocumentScope<Static<typeof DBWebhook>> =
+  client.use('webhooks');
 
 // Mango index backing timerange queries: segments are looked up by flow_id and
 // ordered/filtered on the sortable ts_start key.
@@ -46,6 +49,7 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
       await createDbIfMissing('flows');
       await createDbIfMissing('sources');
       await createDbIfMissing('segments');
+      await createDbIfMissing('webhooks');
 
       await segmentsClient.createIndex({
         index: { fields: ['flow_id', 'ts_start'] },
@@ -66,4 +70,4 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
   }
 };
 
-export { client, flowsClient, sourcesClient, segmentsClient };
+export { client, flowsClient, sourcesClient, segmentsClient, webhooksClient };

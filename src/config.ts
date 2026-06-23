@@ -40,6 +40,9 @@ export const DEFAULT_LIVE_WINDOW_SEC = 300;
 // Inspector UI defaults ON (ADR-007 D4): the inspector is the human value of
 // "single-click runnable", is read-only and cheap. Set ENABLE_UI=false to drop it.
 export const DEFAULT_ENABLE_UI = true;
+// Per-webhook delivery timeout (ms) for outbound event POSTs. A slow or hung
+// subscriber must not stall the API request that triggered the event.
+export const DEFAULT_WEBHOOK_TIMEOUT_MS = 5000;
 
 // Parse a boolean env var. Treats unset as the provided default; "false"/"0"/"no"
 // (case-insensitive) as false; everything else present as true.

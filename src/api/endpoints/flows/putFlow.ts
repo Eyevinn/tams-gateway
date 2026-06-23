@@ -6,6 +6,7 @@ import { DBSource } from '../../../db/schemas/sources/Source';
 import httpError from '../../utils/http-error';
 import getOrUndefined from '../../../db/getOrUndefined';
 import stripDbFields from '../../../db/stripDbFields';
+import notifyWebhooks from '../../utils/notifyWebhooks';
 
 const opts = {
   schema: {
@@ -59,6 +60,7 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       sourcesClient,
       bodyFlow.source_id
     );
+    const sourceExists = existingSource !== undefined;
     const updatedSource: Static<typeof DBSource> = {
       ...existingSource,
       id: bodyFlow.source_id,
@@ -67,6 +69,18 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
     };
     // Create or update source
     await sourcesClient.insert(updatedSource);
+
+    // Emit flow + source event notifications (never throws).
+    await notifyWebhooks(
+      exists ? 'flows/updated' : 'flows/created',
+      { flow: stripDbFields(updatedFlow) },
+      { flowId: id, sourceId: bodyFlow.source_id }
+    );
+    await notifyWebhooks(
+      sourceExists ? 'sources/updated' : 'sources/created',
+      { source: stripDbFields(updatedSource) },
+      { sourceId: bodyFlow.source_id }
+    );
 
     // Segments are stored as individual documents created via
     // POST /flows/:id/segments, so nothing to pre-create here.
