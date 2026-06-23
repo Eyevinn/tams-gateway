@@ -109,6 +109,11 @@ Segments are time-addressed using the TAMS timerange format
 gateway creates the required CouchDB databases and the segment index
 automatically.
 
+`GET /flows/{id}/segments` is paged: pass `limit` to cap the page size, and follow
+the `Link: <...>; rel="next"` response header (or pass the `X-Paging-NextKey` value
+back as the `page` query parameter) to read the next page. Responses also carry
+`X-Paging-Limit`, `X-Paging-Count`, `X-Paging-Reverse-Order` and `X-Paging-Timerange`.
+
 ## HLS output
 
 `GET /flows/{id}/output.m3u8` synthesises an HLS media playlist on the fly from a

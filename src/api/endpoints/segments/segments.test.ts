@@ -291,7 +291,122 @@ describe('listSegments', () => {
       { flow_id: 'desc' },
       { ts_start: 'desc' }
     ]);
-    expect(mockClient.find.mock.calls[0][0].limit).toBe(1);
+    // Paging fetches one extra row (limit + 1) to detect a following page.
+    expect(mockClient.find.mock.calls[0][0].limit).toBe(2);
+    await app.close();
+  });
+});
+
+describe('listSegments paging', () => {
+  // ts_start / ts_end are 20-digit nanosecond keys. A segment starting at `sec`
+  // seconds and 2 seconds long.
+  const docAt = (sec: number) => {
+    const startNs = BigInt(sec) * 1_000_000_000n;
+    const endNs = startNs + 2_000_000_000n;
+    return {
+      object_id: `bucket/${sec}`,
+      timerange: `[${sec}:0_${sec + 2}:0)`,
+      ts_start: startNs.toString().padStart(20, '0'),
+      ts_end: endNs.toString().padStart(20, '0')
+    };
+  };
+  const tsKey = (sec: number) =>
+    (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
+
+  it('always returns the paging headers', async () => {
+    mockClient.find.mockResolvedValue({ docs: [docAt(0)] });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-paging-limit']).toBe('1000');
+    expect(res.headers['x-paging-count']).toBe('1');
+    expect(res.headers['x-paging-reverse-order']).toBe('false');
+    expect(res.headers['x-paging-timerange']).toBe('[0:0_2:0)');
+    // Single page: no next cursor.
+    expect(res.headers['x-paging-nextkey']).toBeUndefined();
+    expect(res.headers['link']).toBeUndefined();
+    await app.close();
+  });
+
+  it('emits NextKey and a Link header when a further page exists', async () => {
+    // limit=2 fetches 3; the third row signals more and is the next cursor.
+    mockClient.find.mockResolvedValue({
+      docs: [docAt(0), docAt(2), docAt(4)]
+    });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?limit=2'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClient.find.mock.calls[0][0].limit).toBe(3);
+    const body = res.json();
+    expect(body).toHaveLength(2);
+    const expectedKey = tsKey(4);
+    expect(res.headers['x-paging-nextkey']).toBe(expectedKey);
+    expect(res.headers['link']).toBe(
+      `</flows/flow-1/segments?limit=2&page=${expectedKey}>; rel="next"`
+    );
+    await app.close();
+  });
+
+  it('applies the page cursor as an inclusive lower bound when ascending', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+    const cursor = '00000000000000000010';
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?page=${cursor}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+      $gte: cursor
+    });
+    await app.close();
+  });
+
+  it('applies the page cursor as an inclusive upper bound when descending', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+    const cursor = '00000000000000000010';
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?reverse_order=true&page=${cursor}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+      $lte: cursor
+    });
+    await app.close();
+  });
+
+  it('merges the page cursor with an existing timerange bound on ts_start', async () => {
+    mockClient.find.mockResolvedValue({ docs: [] });
+    const cursor = '00000000000000000010';
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?timerange=[5:0_15:0)&page=${cursor}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Upper bound from the timerange end plus the lower bound from the cursor.
+    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+      $lt: '00000000015000000000',
+      $gte: cursor
+    });
     await app.close();
   });
 });
