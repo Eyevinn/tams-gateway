@@ -13,7 +13,7 @@
 The gateway is, by design, a narrow high-value subset of a TAMS server: **segment
 ingest, indexing, and playback** (presigned S3 URLs plus on-the-fly HLS). Within
 that subset the implementation is solid: clean handlers, unit tests beside each
-endpoint, and a conformance harness that runs Schemathesis against a *subset* of
+endpoint, and a conformance harness that runs Schemathesis against a _subset_ of
 the real BBC spec so it validates real responses without flagging the
 intentionally unimplemented endpoints.
 
@@ -30,19 +30,19 @@ The gap is the **feature surface**, not code quality or conformance tooling.
 
 Verified against `src/api/api.ts` and `spec/interop-baseline.json`.
 
-| Operation | Notes |
-| --- | --- |
-| `GET /` | Service root paths; redirects a browser to `/ui`. |
-| `GET /flows` | List flows. |
-| `GET /flows/{id}` | Get a flow. |
-| `PUT /flows/{id}` | Create/update a flow, and auto-creates its source. |
-| `DELETE /flows/{id}` | Delete a flow and its segments. |
-| `GET /sources` | List sources only. |
-| `POST /flows/{id}/storage` | Allocate objects, return presigned PUT URLs. |
-| `POST /flows/{id}/segments` | Single or array, idempotent upsert, partial-failure 200/201. |
-| `GET /flows/{id}/segments` | `timerange` + `reverse_order` + `limit`. |
-| `GET /flows/{id}/output.m3u8` | **Extension, not in TAMS spec** (HLS playlist). |
-| `/ui`, `/readiness`, `/docs` | Inspector UI, readiness, Swagger UI. |
+| Operation                     | Notes                                                        |
+| ----------------------------- | ------------------------------------------------------------ |
+| `GET /`                       | Service root paths; redirects a browser to `/ui`.            |
+| `GET /flows`                  | List flows.                                                  |
+| `GET /flows/{id}`             | Get a flow.                                                  |
+| `PUT /flows/{id}`             | Create/update a flow, and auto-creates its source.           |
+| `DELETE /flows/{id}`          | Delete a flow and its segments.                              |
+| `GET /sources`                | List sources only.                                           |
+| `POST /flows/{id}/storage`    | Allocate objects, return presigned PUT URLs.                 |
+| `POST /flows/{id}/segments`   | Single or array, idempotent upsert, partial-failure 200/201. |
+| `GET /flows/{id}/segments`    | `timerange` + `reverse_order` + `limit`.                     |
+| `GET /flows/{id}/output.m3u8` | **Extension, not in TAMS spec** (HLS playlist).              |
+| `/ui`, `/readiness`, `/docs`  | Inspector UI, readiness, Swagger UI.                         |
 
 ## 3. Missing surface (against TAMS 8.1)
 
@@ -59,7 +59,7 @@ Grouped by impact. Operation paths are from the vendored
   **`DELETE /flows/{id}/segments`** (timerange-scoped segment deletion). Today
   deletion is whole-flow only, with no time-window deletion and no async job model.
 - **Objects API** (`GET`/`HEAD /objects/{objectId}`, `POST`/`DELETE
-  /objects/{objectId}/instances`). No object introspection or multi-instance
+/objects/{objectId}/instances`). No object introspection or multi-instance
   handling.
 
 ### Read/metadata surface absent
