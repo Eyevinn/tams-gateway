@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #26';
+  var BUILD = 'build 2026-06-23 #27';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -605,11 +605,21 @@
     ]);
     section.appendChild(row);
 
+    // Show the window's ACTUAL range (start .. start+10min), not just the label.
+    // selCivilMs is the selected window start in civil-local ms; the window ends
+    // 10 minutes later. The "Recorded material" line is the whole recording (the
+    // navigable bounds), which is NOT the window, spelling that out avoids the
+    // "is the window start..now?" confusion.
+    var winEndCivilMs = selCivilMs + WINDOW_SEC * 1000;
     section.appendChild(
       el('p', {
         class: 'status',
         text:
-          'Showing a 10-minute window. Recorded span: ' +
+          'Showing ' +
+          new Date(selCivilMs).toLocaleString() +
+          ' – ' +
+          new Date(winEndCivilMs).toLocaleTimeString() +
+          ' (10-minute window). Recorded material available ' +
           new Date(firstCivilMs).toLocaleString() +
           ' to ' +
           new Date(lastCivilMs).toLocaleString() +
