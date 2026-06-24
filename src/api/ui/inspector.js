@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-24 #28';
+  var BUILD = 'build 2026-06-24 #29';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -60,6 +60,20 @@
       }
       return res.json();
     });
+  }
+
+  // Show the gateway's release version (from /service, sourced from package.json)
+  // alongside the UI build stamp. The build stamp stays as the cache-bust signal;
+  // the version is the human-facing release. Best-effort: on failure the footer
+  // just keeps the build stamp.
+  if (buildEl) {
+    getJson('service')
+      .then(function (svc) {
+        if (svc && svc.version) {
+          buildEl.textContent = 'TAMS Gateway v' + svc.version + ' · ' + BUILD;
+        }
+      })
+      .catch(function () {});
   }
 
   // --- small DOM helpers ----------------------------------------------------

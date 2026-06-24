@@ -1,4 +1,8 @@
 import { FastifyPluginCallback } from 'fastify';
+// Single source of truth for the gateway's own version: package.json
+// (resolveJsonModule is enabled). Distinct from api_version below, which is the
+// TAMS spec version this gateway targets.
+import { version as gatewayVersion } from '../../../../package.json';
 
 // Minimal TAMS service descriptor (service.json). Its purpose here is discovery:
 // listing "webhooks" in event_stream_mechanisms is how a client learns this
@@ -9,6 +13,8 @@ const SERVICE = {
   description:
     'Time-addressable Media Store (TAMS) gateway: indexes segmented media flows and serves presigned URLs.',
   type: 'urn:x-tams:service:tams-gateway',
+  // The gateway's own release version (from package.json). NOT the spec version.
+  version: gatewayVersion,
   // The TAMS API version this gateway targets (vendored spec tag).
   api_version: '8.1',
   // min_object_timeout / min_presigned_url_timeout use the Timestamp format
