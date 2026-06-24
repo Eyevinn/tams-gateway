@@ -29,7 +29,7 @@
 
   // Visible build stamp: bump on every UI change so a reload visibly confirms
   // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-23 #27';
+  var BUILD = 'build 2026-06-24 #28';
 
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
@@ -810,18 +810,21 @@
     wrap.appendChild(video);
     wrap.appendChild(el('div', { class: 'watching' }, [clock]));
     wrap.appendChild(seekbar);
-    wrap.appendChild(
-      el('div', { class: 'player-controls' }, [
-        jumpBtn('-60s', -60),
-        jumpBtn('-30s', -30),
-        jumpBtn('-10s', -10),
-        jumpBtn('+10s', 10),
-        jumpBtn('+30s', 30),
-        jumpBtn('+60s', 60),
-        live30Btn,
-        liveBtn
-      ])
-    );
+    // The "» Live" / "» Live -30s" jumps only make sense at the live edge. In a
+    // fixed 10-minute window (mode 'window') there is no live edge to chase, so
+    // omit them there; relative seeks (+/- Ns) still apply to the window.
+    var controls = [
+      jumpBtn('-60s', -60),
+      jumpBtn('-30s', -30),
+      jumpBtn('-10s', -10),
+      jumpBtn('+10s', 10),
+      jumpBtn('+30s', 30),
+      jumpBtn('+60s', 60)
+    ];
+    if (mode === 'live') {
+      controls.push(live30Btn, liveBtn);
+    }
+    wrap.appendChild(el('div', { class: 'player-controls' }, controls));
 
     var playStatus = el('p', {
       class: 'status',
