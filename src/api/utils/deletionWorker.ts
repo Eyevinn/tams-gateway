@@ -68,82 +68,91 @@ const claim = async (
   }
 };
 
-const markDone = async (doc: DeletionRequestDoc): Promise<void> => {
-  const updated = new Date().toISOString();
-  await withCouchRetry(() =>
-    deletionRequestsClient.insert({ ...doc, status: 'done', updated })
-  );
-};
-
-const markError = async (
+// Write a terminal status for the request, re-reading the latest revision first
+// so the write wins even if the doc's _rev moved on during a long-running
+// delete (performDeletion can run for minutes). Returns true if the terminal
+// status was persisted, false if it could not be (caller must NOT keep retrying
+// the same doc in a tight loop). Never throws.
+const markTerminal = async (
   doc: DeletionRequestDoc,
-  err: unknown
-): Promise<void> => {
+  status: 'done' | 'error',
+  err?: unknown
+): Promise<boolean> => {
   const now = new Date().toISOString();
-  const summary = err instanceof Error ? err.message : String(err);
-  // Re-fetch the latest _rev: the claim wrote a new revision, and we want this
-  // write to win even if a transient retry already bumped it.
   try {
     const latest = (await withCouchRetry(() =>
       deletionRequestsClient.get(doc.id)
     )) as DeletionRequestDoc;
-    await withCouchRetry(() =>
-      deletionRequestsClient.insert({
-        ...latest,
-        status: 'error',
-        updated: now,
-        error: { type: 'about:blank', summary, time: now }
-      })
-    );
+    // If another writer already moved this request to a terminal state, leave it
+    // alone (do not clobber a `done` with a late `error`, or vice versa).
+    if (latest.status === 'done' || latest.status === 'error') return true;
+    const update: DeletionRequestDoc = { ...latest, status, updated: now };
+    if (status === 'error') {
+      const summary = err instanceof Error ? err.message : String(err);
+      update.error = { type: 'about:blank', summary, time: now };
+    }
+    await withCouchRetry(() => deletionRequestsClient.insert(update));
+    return true;
   } catch (writeErr) {
-    // Never let a bookkeeping failure crash the worker loop.
+    // Never let a bookkeeping failure crash the worker loop. Report failure so
+    // the caller stops draining and waits for the next scheduled poll (built-in
+    // backoff) rather than spinning on a request it cannot terminate.
     Logger.red(
-      `Deletion worker: failed to record error for request ${doc.id}: ${
+      `Deletion worker: failed to record ${status} for request ${doc.id}: ${
         writeErr instanceof Error ? writeErr.message : String(writeErr)
       }`
     );
+    return false;
   }
 };
 
-// Process at most one pending request per pass. Returns true if it did work, so
-// the caller can immediately poll again (drain the backlog) instead of waiting a
-// full poll interval.
-const processOne = async (): Promise<boolean> => {
+// Outcome of one processing pass, used by the drain loop to decide whether to
+// continue immediately or back off to the poll interval.
+//   'idle'       - nothing pending; stop draining.
+//   'progressed' - a request reached a terminal status; keep draining.
+//   'stalled'    - found a request but could not make terminal progress (lost
+//                  claim, or terminal write failed); stop draining and let the
+//                  scheduled poll retry after POLL_INTERVAL_MS. Prevents a tight
+//                  livelock when a request cannot be moved to done/error.
+type ProcessResult = 'idle' | 'progressed' | 'stalled';
+
+const processOne = async (): Promise<ProcessResult> => {
   const pending = await findPending();
-  if (!pending) return false;
+  if (!pending) return 'idle';
 
   const claimed = await claim(pending);
-  if (!claimed) return true; // someone else took it; keep draining
+  // Lost the claim (409). Do NOT re-pick the same doc immediately (that spins);
+  // back off to the next scheduled poll.
+  if (!claimed) return 'stalled';
 
   try {
     await performDeletion(claimed);
-    // markDone re-reads not needed: claimed carries the post-claim _rev and
-    // performDeletion does not touch the request doc.
-    await markDone(claimed);
-    Logger.black(`Deletion worker: completed request ${claimed.id}`);
+    const ok = await markTerminal(claimed, 'done');
+    if (ok) Logger.black(`Deletion worker: completed request ${claimed.id}`);
+    return ok ? 'progressed' : 'stalled';
   } catch (err) {
     Logger.red(
       `Deletion worker: request ${claimed.id} failed: ${
         err instanceof Error ? err.message : String(err)
       }`
     );
-    await markError(claimed, err);
+    const ok = await markTerminal(claimed, 'error', err);
+    return ok ? 'progressed' : 'stalled';
   }
-  return true;
 };
 
-// One scheduler pass: drain as many pending requests as exist, then reschedule.
+// One scheduler pass: drain pending requests while we make terminal progress,
+// then reschedule. A 'stalled' or 'idle' result stops the drain so we wait a
+// full poll interval (backoff) instead of spinning on a request we cannot
+// terminate.
 const tick = async (): Promise<void> => {
   if (running || stopped) return;
   running = true;
   try {
-    // Drain the backlog so a burst of requests (or a startup resume of several
-    // non-terminal requests) is cleared without waiting a poll interval between
-    // each. A thrown error here is unexpected (processOne catches per-request
-    // failures itself); log and let the next scheduled tick retry.
-    while (!stopped && (await processOne())) {
-      /* keep draining */
-    }
+    let result: ProcessResult;
+    do {
+      result = await processOne();
+    } while (!stopped && result === 'progressed');
   } catch (err) {
     Logger.red(
       `Deletion worker: poll failed: ${
@@ -179,9 +188,11 @@ export const stopDeletionWorker = (): void => {
   }
 };
 
-// Exported for tests: run a single drain pass synchronously.
+// Exported for tests: run a single drain pass synchronously. Stops as soon as a
+// pass does not make terminal progress (idle or stalled), so a request that
+// cannot be terminated does not spin the loop.
 export const __processAll = async (): Promise<void> => {
-  while (await processOne()) {
+  while ((await processOne()) === 'progressed') {
     /* drain */
   }
 };

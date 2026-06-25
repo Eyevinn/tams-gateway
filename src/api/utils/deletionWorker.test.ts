@@ -55,6 +55,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   requests.insert.mockResolvedValue({ ok: true, rev: '2-def' });
   perform.mockResolvedValue({ deleted: 0, deletedRange: null });
+  // markTerminal re-reads the latest doc before writing done/error; default it
+  // to the claimed (started, non-terminal) state.
+  requests.get.mockResolvedValue(makeDoc({ status: 'started', _rev: '2-def' }));
 });
 
 describe('deletion worker', () => {
@@ -85,7 +88,7 @@ describe('deletion worker', () => {
   it('sets status error (without crashing the worker) when the delete fails', async () => {
     servePending([makeDoc({ status: 'created' })]);
     perform.mockRejectedValue(new Error('couch exploded'));
-    // markError re-reads the latest doc before writing the error status.
+    // markTerminal re-reads the latest doc before writing the error status.
     requests.get.mockResolvedValue(
       makeDoc({ status: 'started', _rev: '2-def' })
     );
@@ -98,6 +101,44 @@ describe('deletion worker', () => {
       .find((d) => d.status === 'error');
     expect(errorWrite).toBeDefined();
     expect(errorWrite.error.summary).toBe('couch exploded');
+  });
+
+  it('does not spin when a failed request cannot be moved to a terminal status', async () => {
+    // performDeletion fails AND the terminal-status write fails (e.g. CouchDB
+    // outage): the request stays non-terminal. The drain loop must STOP after
+    // this pass (return without spinning), not re-pick the same doc forever.
+    let findCalls = 0;
+    requests.find.mockImplementation(async () => {
+      findCalls++;
+      return { docs: [makeDoc({ status: 'started' })] };
+    });
+    perform.mockRejectedValue(new Error('down'));
+    // markTerminal's get/insert both fail, so it cannot persist 'error'.
+    requests.get.mockRejectedValue(new Error('couch unreachable'));
+
+    await expect(__processAll()).resolves.toBeUndefined();
+
+    // One claim attempt and one terminal-write attempt for the single pass; the
+    // loop did not iterate again on the same un-terminable request.
+    expect(perform).toHaveBeenCalledTimes(1);
+    expect(findCalls).toBe(1);
+  });
+
+  it('does not spin on a lost claim (409)', async () => {
+    // The claim insert conflicts (another writer moved the doc). The worker must
+    // back off, not re-pick the same doc in a tight loop.
+    let findCalls = 0;
+    requests.find.mockImplementation(async () => {
+      findCalls++;
+      return { docs: [makeDoc({ status: 'started' })] };
+    });
+    // First insert is the claim; make it 409.
+    requests.insert.mockRejectedValue({ statusCode: 409 });
+
+    await expect(__processAll()).resolves.toBeUndefined();
+
+    expect(perform).not.toHaveBeenCalled();
+    expect(findCalls).toBe(1);
   });
 
   it('does nothing when there are no pending requests', async () => {
