@@ -102,6 +102,25 @@ const run = async () => {
   });
   check(segRes.status === 201, `POST segment -> ${segRes.status}`);
 
+  // 4b. Bulk-register a batch of segments in one request. This guards the
+  //     existence-check in POST /flows/{id}/segments: it MUST use POST _all_docs
+  //     (keys in the body). A GET _all_docs?keys= puts every id in the URL, and a
+  //     real batch overflows CouchDB's URL limit -> 414 URI Too Long -> every
+  //     segment fails. Unit tests mock CouchDB and cannot catch this; only a
+  //     real batch against a live CouchDB does. Distinct far-away timeranges keep
+  //     these out of the single-segment list check below; they are cleaned up by
+  //     the DELETE at the end.
+  const batch = Array.from({ length: 100 }, (_, i) => ({
+    object_id: `batch-${randomUUID()}`,
+    timerange: `[${1000 + i}:0_${1001 + i}:0)`
+  }));
+  const batchRes = await api('POST', `/flows/${flowId}/segments`, batch);
+  check(
+    batchRes.status === 201,
+    `POST 100-segment batch -> ${batchRes.status}` +
+      (batchRes.status === 200 ? ' (some failed, e.g. 414 URI too long)' : '')
+  );
+
   // 5. List segments by timerange
   const listRes = await api(
     'GET',

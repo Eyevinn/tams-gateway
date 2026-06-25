@@ -7,8 +7,8 @@ vi.mock('../../../db/client', () => ({
     get: vi.fn(),
     insert: vi.fn(),
     find: vi.fn(),
-    // _all_docs keys lookup for existing revisions, then the bulk write.
-    list: vi.fn(),
+    // POST _all_docs keys lookup for existing revisions, then the bulk write.
+    fetchRevs: vi.fn(),
     bulk: vi.fn()
   },
   // notifyWebhooks queries this; no subscribers in these tests.
@@ -27,7 +27,7 @@ const mockClient = segmentsClient as unknown as {
   get: Mock;
   insert: Mock;
   find: Mock;
-  list: Mock;
+  fetchRevs: Mock;
   bulk: Mock;
 };
 
@@ -65,7 +65,7 @@ beforeEach(() => {
 describe('postSegments', () => {
   it('upserts a new segment with derived flow_id and keys', async () => {
     const id = 'flow-1:00000000000000000000:bucket/obj-1';
-    mockClient.list.mockResolvedValue(allDocsResponse([id]));
+    mockClient.fetchRevs.mockResolvedValue(allDocsResponse([id]));
     mockClient.bulk.mockResolvedValue([{ id, rev: '1-new' }]);
 
     const app = buildApp(postSegments);
@@ -94,7 +94,7 @@ describe('postSegments', () => {
 
   it('reuses the revision when the segment already exists (re-post upserts)', async () => {
     const id = 'flow-1:00000000000000000000:bucket/obj-1';
-    mockClient.list.mockResolvedValue(
+    mockClient.fetchRevs.mockResolvedValue(
       allDocsResponse([id], { [id]: { rev: '2-abc' } })
     );
     mockClient.bulk.mockResolvedValue([{ id, rev: '3-def' }]);
@@ -118,7 +118,7 @@ describe('postSegments', () => {
     // _all_docs returns the tombstone row for a deleted id: value carries the
     // rev and deleted: true. A plain GET would have 404'd, dropping the rev and
     // forcing a conflict on insert.
-    mockClient.list.mockResolvedValue(
+    mockClient.fetchRevs.mockResolvedValue(
       allDocsResponse([id], { [id]: { rev: '5-deleted', deleted: true } })
     );
     mockClient.bulk.mockResolvedValue([{ id, rev: '6-recreated' }]);
@@ -155,7 +155,7 @@ describe('postSegments', () => {
       'flow-1:00000000000000000000:bucket/obj-1',
       'flow-1:00000000010000000000:bucket/obj-2'
     ];
-    mockClient.list.mockResolvedValue(allDocsResponse(ids));
+    mockClient.fetchRevs.mockResolvedValue(allDocsResponse(ids));
     mockClient.bulk.mockImplementation(async ({ docs }) => bulkOk(docs));
 
     const app = buildApp(postSegments);
@@ -171,9 +171,9 @@ describe('postSegments', () => {
     expect(res.statusCode).toBe(201);
     expect(res.body).toBe('');
     // Two segments, still exactly one round-trip each for read and write.
-    expect(mockClient.list).toHaveBeenCalledTimes(1);
+    expect(mockClient.fetchRevs).toHaveBeenCalledTimes(1);
     expect(mockClient.bulk).toHaveBeenCalledTimes(1);
-    expect(mockClient.list.mock.calls[0][0].keys).toEqual(ids);
+    expect(mockClient.fetchRevs.mock.calls[0][0].keys).toEqual(ids);
     expect(mockClient.bulk.mock.calls[0][0].docs).toHaveLength(2);
     await app.close();
   });
@@ -183,7 +183,7 @@ describe('postSegments', () => {
       'flow-1:00000000000000000000:bucket/obj-1',
       'flow-1:00000000010000000000:bucket/obj-2'
     ];
-    mockClient.list.mockResolvedValue(allDocsResponse(ids));
+    mockClient.fetchRevs.mockResolvedValue(allDocsResponse(ids));
     // First doc conflicts, second succeeds. Per-doc bulk errors map to
     // failed_segments while the batch as a whole still resolves.
     mockClient.bulk.mockResolvedValue([
@@ -213,7 +213,7 @@ describe('postSegments', () => {
 
   it('fails only the bad timerange and bulk-writes the rest', async () => {
     const goodId = 'flow-1:00000000000000000000:bucket/obj-1';
-    mockClient.list.mockResolvedValue(allDocsResponse([goodId]));
+    mockClient.fetchRevs.mockResolvedValue(allDocsResponse([goodId]));
     mockClient.bulk.mockResolvedValue([{ id: goodId, rev: '1-ok' }]);
 
     const app = buildApp(postSegments);
@@ -244,7 +244,7 @@ describe('postSegments', () => {
 
   it('fails the whole batch with 200 when the bulk write throws after retries', async () => {
     const id = 'flow-1:00000000000000000000:bucket/obj-1';
-    mockClient.list.mockResolvedValue(allDocsResponse([id]));
+    mockClient.fetchRevs.mockResolvedValue(allDocsResponse([id]));
     mockClient.bulk.mockRejectedValue(new Error('service unavailable'));
 
     const app = buildApp(postSegments);
