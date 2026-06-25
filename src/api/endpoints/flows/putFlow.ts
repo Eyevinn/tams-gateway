@@ -3,6 +3,7 @@ import { FastifyPluginCallback } from 'fastify';
 import { flowsClient, sourcesClient } from '../../../db/client';
 import { DBFlow, Flow } from '../../../db/schemas/flows/Flow';
 import { DBSource } from '../../../db/schemas/sources/Source';
+import CollectionItem from '../../../db/schemas/common/CollectionItem';
 import httpError from '../../utils/http-error';
 import getOrUndefined from '../../../db/getOrUndefined';
 import stripDbFields from '../../../db/stripDbFields';
@@ -61,11 +62,40 @@ const putFlow: FastifyPluginCallback = (fastify, _, next) => {
       bodyFlow.source_id
     );
     const sourceExists = existingSource !== undefined;
+
+    // Derive the Source's source_collection from the Flow's flow_collection.
+    // Per TAMS source.json + app note 0001, source_collection is server-managed
+    // and inferred from the Flow collection: each member Flow contributes its
+    // own Source (resolved via the member Flow's source_id), carrying the role.
+    // Members not yet registered are skipped, so the collection completes as
+    // members are created. The grouping Flow is inserted above, so a member that
+    // points back at this Flow's own Source resolves correctly.
+    let sourceCollection: Static<typeof CollectionItem>[] | undefined;
+    if (bodyFlow.flow_collection && bodyFlow.flow_collection.length > 0) {
+      const resolved = await Promise.all(
+        bodyFlow.flow_collection.map(async (member) => {
+          const memberFlow = await getOrUndefined(flowsClient, member.id);
+          if (!memberFlow?.source_id) {
+            return undefined;
+          }
+          return { id: memberFlow.source_id, role: member.role };
+        })
+      );
+      sourceCollection = resolved.filter(
+        (item): item is Static<typeof CollectionItem> => item !== undefined
+      );
+    }
+
     const updatedSource: Static<typeof DBSource> = {
+      // Spreading the existing document preserves client-managed Source fields
+      // (label/description/tags set via the /sources/:id/* endpoints) and any
+      // previously derived source_collection: a flow PUT updates the Source's
+      // format and refreshes its derived collection without clobbering the rest.
       ...existingSource,
       id: bodyFlow.source_id,
       _id: bodyFlow.source_id,
-      format: bodyFlow.format
+      format: bodyFlow.format,
+      ...(sourceCollection ? { source_collection: sourceCollection } : {})
     };
     // Create or update source
     await sourcesClient.insert(updatedSource);

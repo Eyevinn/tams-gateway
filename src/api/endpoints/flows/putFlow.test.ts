@@ -29,6 +29,35 @@ const audioFlow = {
   essence_parameters: {}
 };
 
+// A grouping Multi-Flow: no codec, no container, no essence_parameters of its
+// own (flow-multi.json), collecting per-essence Flows via flow_collection.
+const multiFlow = {
+  id: '00000000-0000-1000-8000-0000000000a0',
+  source_id: '00000000-0000-1000-8000-0000000000a1',
+  format: 'urn:x-nmos:format:multi',
+  flow_collection: [
+    // Member with only id + role (collection-item.json): no container_mapping.
+    { id: '00000000-0000-1000-8000-0000000000b0', role: 'video' },
+    // Member with a container_mapping carrying integer track indices.
+    {
+      id: '00000000-0000-1000-8000-0000000000b1',
+      role: 'L',
+      container_mapping: {
+        track_index: 1,
+        format_track_index: 0,
+        mp2ts_container: { pid: 257 }
+      }
+    }
+  ]
+};
+
+const mockCreate = () => {
+  flows.get.mockRejectedValue({ statusCode: 404 });
+  flows.insert.mockResolvedValue({ ok: true });
+  sources.get.mockRejectedValue({ statusCode: 404 });
+  sources.insert.mockResolvedValue({ ok: true });
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -130,6 +159,180 @@ describe('putFlow', () => {
     const stored = flows.insert.mock.calls[0][0];
     expect(stored).not.toHaveProperty('collected_by');
     expect(res.json()).not.toHaveProperty('collected_by');
+    await app.close();
+  });
+
+  it('accepts a Multi-Flow with no codec/container and stores it (201)', async () => {
+    // flow-multi.json requires only id, source_id and format. Previously the
+    // request schema marked codec and essence_parameters required, so a
+    // spec-valid Multi-Flow was rejected with 400.
+    mockCreate();
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(flows.insert).toHaveBeenCalledTimes(1);
+    const stored = flows.insert.mock.calls[0][0];
+    expect(stored).not.toHaveProperty('codec');
+    await app.close();
+  });
+
+  it('accepts flow_collection items with only id + role', async () => {
+    // collection-item.json requires only id + role; container_mapping was
+    // wrongly required, rejecting a bare member with 400.
+    mockCreate();
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const stored = flows.insert.mock.calls[0][0];
+    expect(stored.flow_collection[0]).toEqual({
+      id: '00000000-0000-1000-8000-0000000000b0',
+      role: 'video'
+    });
+    await app.close();
+  });
+
+  it('round-trips container_mapping track indices as integers, not strings', async () => {
+    // container-mapping.json types track_index/format_track_index as integer.
+    // The String schema coerced numeric input to a string ("0"); they must
+    // persist and echo back as numbers.
+    mockCreate();
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const mapping = res.json().flow_collection[1].container_mapping;
+    expect(mapping.track_index).toBe(1);
+    expect(mapping.format_track_index).toBe(0);
+    expect(typeof mapping.track_index).toBe('number');
+    expect(typeof mapping.format_track_index).toBe('number');
+
+    const storedMapping =
+      flows.insert.mock.calls[0][0].flow_collection[1].container_mapping;
+    expect(typeof storedMapping.track_index).toBe('number');
+    await app.close();
+  });
+
+  it('derives the Source source_collection from flow_collection members', async () => {
+    // source.json + app note 0001: source_collection is server-managed and
+    // inferred from the Flow collection. Each member Flow is resolved to its
+    // own source_id, carrying the role from the flow_collection item.
+    const memberFlows: Record<string, { source_id: string }> = {
+      '00000000-0000-1000-8000-0000000000b0': {
+        source_id: '00000000-0000-1000-8000-0000000000c0'
+      },
+      '00000000-0000-1000-8000-0000000000b1': {
+        source_id: '00000000-0000-1000-8000-0000000000c1'
+      }
+    };
+    // The mux flow does not exist yet (404); member flows resolve to their docs.
+    flows.get.mockImplementation((flowId: string) => {
+      if (memberFlows[flowId]) {
+        return Promise.resolve({ _id: flowId, ...memberFlows[flowId] });
+      }
+      return Promise.reject({ statusCode: 404 });
+    });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual([
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' },
+      { id: '00000000-0000-1000-8000-0000000000c1', role: 'L' }
+    ]);
+    await app.close();
+  });
+
+  it('skips unresolved flow_collection members when deriving source_collection', async () => {
+    // Best-effort derivation: a member Flow not yet registered (404) is omitted
+    // rather than failing the whole PUT.
+    flows.get.mockImplementation((flowId: string) => {
+      if (flowId === '00000000-0000-1000-8000-0000000000b0') {
+        return Promise.resolve({
+          _id: flowId,
+          source_id: '00000000-0000-1000-8000-0000000000c0'
+        });
+      }
+      return Promise.reject({ statusCode: 404 });
+    });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual([
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' }
+    ]);
+    await app.close();
+  });
+
+  it('preserves an existing derived source_collection on a metadata-only flow re-PUT', async () => {
+    // A re-PUT of the grouping Flow without flow_collection (e.g. a label-only
+    // update) must not wipe the previously derived source_collection: the
+    // existing Source document is spread through unchanged apart from format.
+    const existingCollection = [
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' },
+      { id: '00000000-0000-1000-8000-0000000000c1', role: 'L' }
+    ];
+    flows.get.mockResolvedValue({ _id: multiFlow.id, _rev: '1-abc' });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockResolvedValue({
+      _id: multiFlow.source_id,
+      id: multiFlow.source_id,
+      format: multiFlow.format,
+      source_collection: existingCollection
+    });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const metadataOnly = {
+      id: multiFlow.id,
+      source_id: multiFlow.source_id,
+      format: multiFlow.format
+    };
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: metadataOnly
+    });
+
+    expect(res.statusCode).toBe(204);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual(existingCollection);
     await app.close();
   });
 });
