@@ -29,30 +29,39 @@ const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
     // Emit the flow-deleted notification (never throws).
     await notifyWebhooks('flows/deleted', { flow_id: id }, { flowId: id });
 
-    // Collect the flow's segments, keeping object_id so the underlying media
-    // objects can be reclaimed after the segment docs are removed.
-    const segments = await segmentsClient.find({
-      selector: { flow_id: id },
-      fields: ['_id', '_rev', 'object_id']
-    });
-
-    if (segments.docs.length > 0) {
+    // Delete the flow's segment docs in batches, collecting object_id so the
+    // underlying media objects can be reclaimed afterwards. A Mango find with no
+    // limit returns only CouchDB's default page (25 docs), so a single-shot
+    // delete would orphan every segment beyond the first page (and their S3
+    // objects). Loop until the flow has no segments left: each batch is deleted
+    // before the next find, so the just-deleted docs drop out of the results.
+    const BATCH = 1000;
+    const objectIds: string[] = [];
+    for (;;) {
+      const batch = await segmentsClient.find({
+        selector: { flow_id: id },
+        fields: ['_id', '_rev', 'object_id'],
+        limit: BATCH
+      });
+      if (batch.docs.length === 0) break;
       await segmentsClient.bulk({
-        docs: segments.docs.map((doc) => ({
+        docs: batch.docs.map((doc) => ({
           _id: doc._id,
           _rev: doc._rev,
           _deleted: true
         }))
       });
+      for (const doc of batch.docs) {
+        if (doc.object_id) objectIds.push(doc.object_id);
+      }
+      if (batch.docs.length < BATCH) break;
     }
 
     // Reclaim media objects no surviving segment (in any other flow) still
-    // references. Runs after the bulk delete above so this flow's own segments
+    // references. Runs after the bulk deletes above so this flow's own segments
     // no longer count as references. Best-effort: a failed object delete is
     // logged, not fatal (the flow and its segment docs are already gone).
-    await reclaimUnreferencedObjects(
-      segments.docs.map((doc) => doc.object_id).filter(Boolean) as string[]
-    );
+    await reclaimUnreferencedObjects(objectIds);
 
     reply.code(204).send(undefined);
   });
