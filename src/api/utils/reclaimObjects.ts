@@ -8,6 +8,7 @@
 import { segmentsClient } from '../../db/client';
 import deleteS3Objects from './deleteS3Objects';
 import Logger from '../../utils/Logger';
+import withCouchRetry from '../../db/withCouchRetry';
 
 // How many reference checks to run at once. Each check is a single indexed
 // point-lookup (SEGMENTS_OBJECT_INDEX), so a bounded fan-out keeps wall-clock
@@ -31,11 +32,13 @@ const findUnreferencedObjects = async (
         // here is a live reference (in this or another flow) and the object
         // must stay. Backed by SEGMENTS_OBJECT_INDEX so this is an indexed
         // lookup, not a full scan.
-        const stillReferenced = await segmentsClient.find({
-          selector: { object_id: objectId },
-          fields: ['_id'],
-          limit: 1
-        });
+        const stillReferenced = await withCouchRetry(() =>
+          segmentsClient.find({
+            selector: { object_id: objectId },
+            fields: ['_id'],
+            limit: 1
+          })
+        );
         return stillReferenced.docs.length === 0 ? objectId : null;
       })
     );

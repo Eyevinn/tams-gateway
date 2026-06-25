@@ -138,6 +138,46 @@ describe('deleteFlow', () => {
     await app.close();
   });
 
+  it('destroys the flow doc only AFTER segments and objects are cleaned up', async () => {
+    scriptFind(
+      [
+        { _id: 's1', _rev: '1', object_id: 'bucket/obj-1' },
+        { _id: 's2', _rev: '1', object_id: 'bucket/obj-2' }
+      ],
+      { 'bucket/obj-1': 0, 'bucket/obj-2': 0 }
+    );
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'DELETE', url: '/flows/flow-1' });
+
+    expect(res.statusCode).toBe(204);
+    // Ordering matters: a crash mid-reclaim must leave the flow intact so the
+    // DELETE can be retried, never orphan its storage. So destroy runs last.
+    const destroyOrder = flows.destroy.mock.invocationCallOrder[0];
+    const bulkOrder = segments.bulk.mock.invocationCallOrder[0];
+    const reclaimOrder = s3Delete.mock.invocationCallOrder[0];
+    expect(destroyOrder).toBeGreaterThan(bulkOrder);
+    expect(destroyOrder).toBeGreaterThan(reclaimOrder);
+    await app.close();
+  });
+
+  it('does NOT destroy the flow (so the DELETE is retryable) when reclaim fails', async () => {
+    scriptFind([{ _id: 's1', _rev: '1', object_id: 'bucket/obj-1' }], {
+      'bucket/obj-1': 0
+    });
+    // A hard storage failure (not the per-object error path) propagates.
+    s3Delete.mockRejectedValue(new Error('S3 unavailable'));
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'DELETE', url: '/flows/flow-1' });
+
+    expect(res.statusCode).toBe(500);
+    // The flow doc survives, so retrying the DELETE resumes the cleanup rather
+    // than leaving the segments and objects orphaned and unreachable.
+    expect(flows.destroy).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('deletes a flow with no segments without touching S3', async () => {
     scriptFind([], {});
 
