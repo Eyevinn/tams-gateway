@@ -12,6 +12,7 @@ import httpError from '../../utils/http-error';
 import { parseTimeRange, toKey, formatTimeRange } from '../../utils/timerange';
 import reclaimUnreferencedObjects from '../../utils/reclaimObjects';
 import notifyWebhooks from '../../utils/notifyWebhooks';
+import withCouchRetry from '../../../db/withCouchRetry';
 
 const opts = {
   schema: {
@@ -103,19 +104,23 @@ const deleteSegments: FastifyPluginCallback = (fastify, _, next) => {
     let firstStart: bigint | null = null;
     let lastEnd: bigint | null = null;
     for (;;) {
-      const batch = await segmentsClient.find({
-        selector,
-        fields: ['_id', '_rev', 'object_id', 'ts_start', 'ts_end'],
-        limit: BATCH
-      });
+      const batch = await withCouchRetry(() =>
+        segmentsClient.find({
+          selector,
+          fields: ['_id', '_rev', 'object_id', 'ts_start', 'ts_end'],
+          limit: BATCH
+        })
+      );
       if (batch.docs.length === 0) break;
-      await segmentsClient.bulk({
-        docs: batch.docs.map((doc) => ({
-          _id: doc._id,
-          _rev: doc._rev,
-          _deleted: true
-        }))
-      });
+      await withCouchRetry(() =>
+        segmentsClient.bulk({
+          docs: batch.docs.map((doc) => ({
+            _id: doc._id,
+            _rev: doc._rev,
+            _deleted: true
+          }))
+        })
+      );
       for (const doc of batch.docs) {
         if (doc.object_id) objectIds.add(doc.object_id);
         const start = BigInt(doc.ts_start);
