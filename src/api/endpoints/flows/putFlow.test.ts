@@ -298,4 +298,41 @@ describe('putFlow', () => {
     ]);
     await app.close();
   });
+
+  it('preserves an existing derived source_collection on a metadata-only flow re-PUT', async () => {
+    // A re-PUT of the grouping Flow without flow_collection (e.g. a label-only
+    // update) must not wipe the previously derived source_collection: the
+    // existing Source document is spread through unchanged apart from format.
+    const existingCollection = [
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' },
+      { id: '00000000-0000-1000-8000-0000000000c1', role: 'L' }
+    ];
+    flows.get.mockResolvedValue({ _id: multiFlow.id, _rev: '1-abc' });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockResolvedValue({
+      _id: multiFlow.source_id,
+      id: multiFlow.source_id,
+      format: multiFlow.format,
+      source_collection: existingCollection
+    });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const metadataOnly = {
+      id: multiFlow.id,
+      source_id: multiFlow.source_id,
+      format: multiFlow.format
+    };
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: metadataOnly
+    });
+
+    expect(res.statusCode).toBe(204);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual(existingCollection);
+    await app.close();
+  });
 });
