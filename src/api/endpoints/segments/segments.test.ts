@@ -6,7 +6,10 @@ vi.mock('../../../db/client', () => ({
   segmentsClient: {
     get: vi.fn(),
     insert: vi.fn(),
-    find: vi.fn()
+    find: vi.fn(),
+    // _all_docs keys lookup for existing revisions, then the bulk write.
+    list: vi.fn(),
+    bulk: vi.fn()
   },
   // notifyWebhooks queries this; no subscribers in these tests.
   webhooksClient: { find: vi.fn().mockResolvedValue({ docs: [] }) }
@@ -24,7 +27,30 @@ const mockClient = segmentsClient as unknown as {
   get: Mock;
   insert: Mock;
   find: Mock;
+  list: Mock;
+  bulk: Mock;
 };
+
+// An _all_docs (list with keys) response. By default every requested id is
+// absent (a not_found error row with no value), so the handler inserts without
+// a _rev. Pass `existing` to supply a current rev for specific ids, optionally
+// tombstoned (deleted: true), exactly as CouchDB returns for a deleted id.
+const allDocsResponse = (
+  ids: string[],
+  existing: Record<string, { rev: string; deleted?: boolean }> = {}
+) => ({
+  total_rows: 0,
+  offset: 0,
+  rows: ids.map((id) =>
+    existing[id]
+      ? { id, key: id, value: existing[id] }
+      : { key: id, error: 'not_found' }
+  )
+});
+
+// A _bulk_docs all-success response: one ok row (id + rev) per doc, in order.
+const bulkOk = (docs: Array<{ _id: string }>) =>
+  docs.map((doc, i) => ({ id: doc._id, rev: `1-rev${i}` }));
 
 const buildApp = (plugin: FastifyPluginCallback): FastifyInstance => {
   const app = fastify().withTypeProvider<TypeBoxTypeProvider>();
@@ -38,8 +64,9 @@ beforeEach(() => {
 
 describe('postSegments', () => {
   it('upserts a new segment with derived flow_id and keys', async () => {
-    mockClient.get.mockRejectedValue({ statusCode: 404 });
-    mockClient.insert.mockResolvedValue({ ok: true });
+    const id = 'flow-1:00000000000000000000:bucket/obj-1';
+    mockClient.list.mockResolvedValue(allDocsResponse([id]));
+    mockClient.bulk.mockResolvedValue([{ id, rev: '1-new' }]);
 
     const app = buildApp(postSegments);
     const res = await app.inject({
@@ -49,18 +76,28 @@ describe('postSegments', () => {
     });
 
     expect(res.statusCode).toBe(201);
-    const doc = mockClient.insert.mock.calls[0][0];
+    // One bulk write, not a per-segment insert loop.
+    expect(mockClient.bulk).toHaveBeenCalledTimes(1);
+    expect(mockClient.insert).not.toHaveBeenCalled();
+    const docs = mockClient.bulk.mock.calls[0][0].docs;
+    expect(docs).toHaveLength(1);
+    const doc = docs[0];
     expect(doc.flow_id).toBe('flow-1');
     expect(doc.ts_start).toBe('00000000000000000000');
     expect(doc.ts_end).toBe('00000000010000000000');
-    expect(doc._id).toBe('flow-1:00000000000000000000:bucket/obj-1');
+    expect(doc._id).toBe(id);
     expect(doc._rev).toBeUndefined();
+    // get_urls is presigned on read, never stored.
+    expect(doc.get_urls).toBeUndefined();
     await app.close();
   });
 
-  it('reuses the revision when the segment already exists', async () => {
-    mockClient.get.mockResolvedValue({ _rev: '2-abc' });
-    mockClient.insert.mockResolvedValue({ ok: true });
+  it('reuses the revision when the segment already exists (re-post upserts)', async () => {
+    const id = 'flow-1:00000000000000000000:bucket/obj-1';
+    mockClient.list.mockResolvedValue(
+      allDocsResponse([id], { [id]: { rev: '2-abc' } })
+    );
+    mockClient.bulk.mockResolvedValue([{ id, rev: '3-def' }]);
 
     const app = buildApp(postSegments);
     const res = await app.inject({
@@ -70,7 +107,32 @@ describe('postSegments', () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockClient.insert.mock.calls[0][0]._rev).toBe('2-abc');
+    // The current rev from _all_docs is carried into the bulk doc so the
+    // re-post upserts rather than conflicting.
+    expect(mockClient.bulk.mock.calls[0][0].docs[0]._rev).toBe('2-abc');
+    await app.close();
+  });
+
+  it('recreates a previously deleted segment using the tombstone rev (no 409)', async () => {
+    const id = 'flow-1:00000000000000000000:bucket/obj-1';
+    // _all_docs returns the tombstone row for a deleted id: value carries the
+    // rev and deleted: true. A plain GET would have 404'd, dropping the rev and
+    // forcing a conflict on insert.
+    mockClient.list.mockResolvedValue(
+      allDocsResponse([id], { [id]: { rev: '5-deleted', deleted: true } })
+    );
+    mockClient.bulk.mockResolvedValue([{ id, rev: '6-recreated' }]);
+
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: { object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' }
+    });
+
+    expect(res.statusCode).toBe(201);
+    // The tombstone rev is carried so CouchDB resurrects the doc instead of 409.
+    expect(mockClient.bulk.mock.calls[0][0].docs[0]._rev).toBe('5-deleted');
     await app.close();
   });
 
@@ -82,14 +144,19 @@ describe('postSegments', () => {
       payload: { object_id: 'bucket/obj-1', timerange: 'nonsense' }
     });
 
+    // Schema validation rejects the body before the handler runs.
     expect(res.statusCode).toBe(400);
-    expect(mockClient.insert).not.toHaveBeenCalled();
+    expect(mockClient.bulk).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('registers an array of segments and returns 201 with no body', async () => {
-    mockClient.get.mockRejectedValue({ statusCode: 404 });
-    mockClient.insert.mockResolvedValue({ ok: true });
+  it('registers an array of segments in one bulk write and returns 201', async () => {
+    const ids = [
+      'flow-1:00000000000000000000:bucket/obj-1',
+      'flow-1:00000000010000000000:bucket/obj-2'
+    ];
+    mockClient.list.mockResolvedValue(allDocsResponse(ids));
+    mockClient.bulk.mockImplementation(async ({ docs }) => bulkOk(docs));
 
     const app = buildApp(postSegments);
     const res = await app.inject({
@@ -103,16 +170,26 @@ describe('postSegments', () => {
 
     expect(res.statusCode).toBe(201);
     expect(res.body).toBe('');
-    expect(mockClient.insert).toHaveBeenCalledTimes(2);
+    // Two segments, still exactly one round-trip each for read and write.
+    expect(mockClient.list).toHaveBeenCalledTimes(1);
+    expect(mockClient.bulk).toHaveBeenCalledTimes(1);
+    expect(mockClient.list.mock.calls[0][0].keys).toEqual(ids);
+    expect(mockClient.bulk.mock.calls[0][0].docs).toHaveLength(2);
     await app.close();
   });
 
   it('returns 200 with the failed segments on partial failure', async () => {
-    mockClient.get.mockRejectedValue({ statusCode: 404 });
-    // First insert fails, second succeeds.
-    mockClient.insert
-      .mockRejectedValueOnce(new Error('conflict'))
-      .mockResolvedValueOnce({ ok: true });
+    const ids = [
+      'flow-1:00000000000000000000:bucket/obj-1',
+      'flow-1:00000000010000000000:bucket/obj-2'
+    ];
+    mockClient.list.mockResolvedValue(allDocsResponse(ids));
+    // First doc conflicts, second succeeds. Per-doc bulk errors map to
+    // failed_segments while the batch as a whole still resolves.
+    mockClient.bulk.mockResolvedValue([
+      { id: ids[0], error: 'conflict', reason: 'Document update conflict.' },
+      { id: ids[1], rev: '1-ok' }
+    ]);
 
     const app = buildApp(postSegments);
     const res = await app.inject({
@@ -128,7 +205,60 @@ describe('postSegments', () => {
     const body = res.json();
     expect(body.failed_segments).toHaveLength(1);
     expect(body.failed_segments[0].object_id).toBe('bucket/obj-1');
-    expect(body.failed_segments[0].error.summary).toBe('conflict');
+    expect(body.failed_segments[0].error.summary).toBe(
+      'Document update conflict.'
+    );
+    await app.close();
+  });
+
+  it('fails only the bad timerange and bulk-writes the rest', async () => {
+    const goodId = 'flow-1:00000000000000000000:bucket/obj-1';
+    mockClient.list.mockResolvedValue(allDocsResponse([goodId]));
+    mockClient.bulk.mockResolvedValue([{ id: goodId, rev: '1-ok' }]);
+
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: [
+        { object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' },
+        // Passes the body schema (both bounds present) but the nanosecond key
+        // overflows the 20-digit width, so segmentKeys throws and fails only
+        // this segment, not the whole request.
+        {
+          object_id: 'bucket/obj-2',
+          timerange: '[999999999999:0_999999999999:1)'
+        }
+      ]
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.failed_segments).toHaveLength(1);
+    expect(body.failed_segments[0].object_id).toBe('bucket/obj-2');
+    // The good segment is still written, in one bulk call.
+    expect(mockClient.bulk.mock.calls[0][0].docs).toHaveLength(1);
+    expect(mockClient.bulk.mock.calls[0][0].docs[0]._id).toBe(goodId);
+    await app.close();
+  });
+
+  it('fails the whole batch with 200 when the bulk write throws after retries', async () => {
+    const id = 'flow-1:00000000000000000000:bucket/obj-1';
+    mockClient.list.mockResolvedValue(allDocsResponse([id]));
+    mockClient.bulk.mockRejectedValue(new Error('service unavailable'));
+
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: { object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' }
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.failed_segments).toHaveLength(1);
+    expect(body.failed_segments[0].object_id).toBe('bucket/obj-1');
+    expect(body.failed_segments[0].error.summary).toBe('service unavailable');
     await app.close();
   });
 });
