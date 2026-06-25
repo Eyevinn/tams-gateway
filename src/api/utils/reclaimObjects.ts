@@ -10,40 +10,48 @@ import deleteS3Objects from './deleteS3Objects';
 import Logger from '../../utils/Logger';
 import withCouchRetry from '../../db/withCouchRetry';
 
-// How many reference checks to run at once. Each check is a single indexed
-// point-lookup (SEGMENTS_OBJECT_INDEX), so a bounded fan-out keeps wall-clock
-// low for large deletions without overwhelming CouchDB with unbounded parallel
-// requests.
-const RECLAIM_CONCURRENCY = 16;
+// How many object_ids to check per $in query. One round resolves the whole
+// batch when none are still referenced (the common case once a flow's own
+// segments are deleted); otherwise a few rounds as referenced ids drop out.
+const RECLAIM_BATCH = 1000;
 
 const findUnreferencedObjects = async (
   objectIds: string[]
 ): Promise<string[]> => {
   const unreferenced: string[] = [];
-  // Each object_id is checked with its own limit-1 lookup (never a batched
-  // $in): a batched query capped at a page limit could omit a still-referenced
-  // object from the results and we would then wrongly reclaim a live object.
-  // Run the checks in bounded-concurrency chunks rather than strictly serially.
-  for (let i = 0; i < objectIds.length; i += RECLAIM_CONCURRENCY) {
-    const chunk = objectIds.slice(i, i + RECLAIM_CONCURRENCY);
-    const results = await Promise.all(
-      chunk.map(async (objectId) => {
-        // Deleted segments are already excluded from Mango results, so any hit
-        // here is a live reference (in this or another flow) and the object
-        // must stay. Backed by SEGMENTS_OBJECT_INDEX so this is an indexed
-        // lookup, not a full scan.
-        const stillReferenced = await withCouchRetry(() =>
-          segmentsClient.find({
-            selector: { object_id: objectId },
-            fields: ['_id'],
-            limit: 1
-          })
-        );
-        return stillReferenced.docs.length === 0 ? objectId : null;
-      })
-    );
-    for (const objectId of results) {
-      if (objectId !== null) unreferenced.push(objectId);
+  // Batched reference check (one query for up to RECLAIM_BATCH objects instead
+  // of one per object). For each batch we keep a `remaining` set of candidates
+  // and ask for ANY surviving segment that references one of them ($in, backed
+  // by SEGMENTS_OBJECT_INDEX; deleted segments are already excluded from Mango
+  // results). Every returned segment proves its object_id is still referenced,
+  // so we drop that id from `remaining`.
+  //
+  // Safety invariant (no live object is ever wrongly reclaimed): an object_id is
+  // declared unreferenced ONLY when a query whose $in still INCLUDED it returns
+  // zero docs, i.e. no segment references any id in the set. A page `limit` can
+  // therefore never cause a referenced object to be reclaimed; in the worst case
+  // a crowded result just costs another round. Termination: a non-empty result
+  // removes at least one id from `remaining`, so it strictly shrinks.
+  for (let i = 0; i < objectIds.length; i += RECLAIM_BATCH) {
+    const remaining = new Set(objectIds.slice(i, i + RECLAIM_BATCH));
+    while (remaining.size > 0) {
+      const ids = [...remaining];
+      const referencing = await withCouchRetry(() =>
+        segmentsClient.find({
+          selector: { object_id: { $in: ids } },
+          fields: ['object_id'],
+          limit: ids.length
+        })
+      );
+      if (referencing.docs.length === 0) {
+        // No surviving segment references any remaining id: all reclaimable.
+        for (const id of remaining) unreferenced.push(id);
+        break;
+      }
+      for (const doc of referencing.docs) {
+        const objectId = (doc as { object_id?: string }).object_id;
+        if (objectId) remaining.delete(objectId);
+      }
     }
   }
   return unreferenced;
