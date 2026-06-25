@@ -1,6 +1,6 @@
 import { FastifyPluginCallback } from 'fastify';
 import { deletionRequestsClient } from '../../../db/client';
-import stripDbFields from '../../../db/stripDbFields';
+import { stripDeletionRequest } from '../../../db/schemas/deletion-requests/DeletionRequest';
 
 const opts = {
   schema: {
@@ -15,7 +15,7 @@ const listDeletionRequests: FastifyPluginCallback = (fastify, _, next) => {
     const requests = result.rows
       .map((row) => row.doc)
       .filter((doc) => !!doc)
-      .map((doc) => stripDbFields(doc!));
+      .map((doc) => stripDeletionRequest(doc!));
     reply.code(200).send(requests);
   });
   next();

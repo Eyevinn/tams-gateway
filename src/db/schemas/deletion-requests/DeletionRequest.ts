@@ -1,5 +1,6 @@
 import { Type, Static } from '@sinclair/typebox';
 import DBProperties from '../common/DBProperties';
+import stripDbFields from '../../stripDbFields';
 
 // Error detail (TAMS error.json subset), set when status is `error`.
 const DeletionRequestError = Type.Object({
@@ -9,9 +10,11 @@ const DeletionRequestError = Type.Object({
 });
 
 // Deletion Request (deletion-request.json). Tracks a request to delete a
-// timerange of a flow's segments. This gateway deletes synchronously, so a
-// persisted request is recorded with status `done`; the async `started` model
-// (202 + Location) is a follow-up.
+// timerange of a flow's segments. DELETE /flows/{id} and DELETE
+// /flows/{id}/segments create one of these with status `created` and return 202;
+// an in-process background worker claims it and runs the per-batch delete +
+// reclaim to completion server-side, moving status created -> started -> done
+// (or -> error). See src/api/utils/deletionWorker.ts.
 export const DeletionRequest = Type.Object({
   id: Type.String(),
   flow_id: Type.String(),
@@ -31,9 +34,66 @@ export const DeletionRequest = Type.Object({
   error: Type.Optional(DeletionRequestError)
 });
 
+// Internal, persisted-but-not-spec fields the background worker needs to resume
+// and run a request. They are NOT part of the spec deletion-request.json object,
+// so the read endpoints strip them (stripWorkerFields) before returning the
+// request to clients.
+const DeletionRequestWorkerFields = Type.Object({
+  // The object_id query filter from DELETE /flows/{id}/segments?object_id=...,
+  // if any. The worker re-applies it to the segment selector so a resumed run
+  // deletes exactly the same set the request was created for.
+  object_id_filter: Type.Optional(Type.String())
+});
+
 export const DBDeletionRequest = Type.Intersect([
   DeletionRequest,
+  DeletionRequestWorkerFields,
   DBProperties
 ]);
 
 export type DeletionRequestDoc = Static<typeof DBDeletionRequest>;
+
+// The internal worker-only field names (not part of deletion-request.json).
+export const WORKER_ONLY_FIELDS = ['object_id_filter'] as const;
+
+// Project a persisted request doc to the spec deletion-request.json object:
+// drop CouchDB bookkeeping (_id/_rev) and the internal worker-only fields, so a
+// client only ever sees the spec shape. Used by the DELETE handlers' 202 body
+// and the flow-delete-requests read endpoints.
+export const stripDeletionRequest = <T extends object>(
+  doc: T
+): Record<string, unknown> => {
+  const copy = stripDbFields(doc) as Record<string, unknown>;
+  for (const field of WORKER_ONLY_FIELDS) delete copy[field];
+  return copy;
+};
+
+// Build the persisted request doc for a new deletion (status `created`).
+// Centralised here, the lightweight schema module, so the DELETE handlers do not
+// pull in the worker (and its S3/AWS import chain) just to construct a doc. The
+// worker and the handlers share this shape, including the worker-only
+// object_id_filter that is stripped from client responses.
+export const buildDeletionRequestDoc = (input: {
+  id: string;
+  flow_id: string;
+  timerange_to_delete: string;
+  delete_flow: boolean;
+  object_id_filter?: string;
+  created_by?: string;
+}): DeletionRequestDoc => {
+  const now = new Date().toISOString();
+  return {
+    _id: input.id,
+    id: input.id,
+    flow_id: input.flow_id,
+    timerange_to_delete: input.timerange_to_delete,
+    delete_flow: input.delete_flow,
+    status: 'created',
+    created: now,
+    updated: now,
+    ...(input.object_id_filter
+      ? { object_id_filter: input.object_id_filter }
+      : {}),
+    ...(input.created_by ? { created_by: input.created_by } : {})
+  };
+};

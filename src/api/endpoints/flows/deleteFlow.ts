@@ -1,11 +1,13 @@
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
-import { flowsClient, segmentsClient } from '../../../db/client';
-import { Flow } from '../../../db/schemas/flows/Flow';
+import { v4 as uuidv4 } from 'uuid';
+import { flowsClient, deletionRequestsClient } from '../../../db/client';
 import ErrorResponse from '../../utils/error-response';
-import reclaimUnreferencedObjects from '../../utils/reclaimObjects';
-import notifyWebhooks from '../../utils/notifyWebhooks';
-import withCouchRetry from '../../../db/withCouchRetry';
+import httpError from '../../utils/http-error';
+import {
+  buildDeletionRequestDoc,
+  stripDeletionRequest
+} from '../../../db/schemas/deletion-requests/DeletionRequest';
 
 const opts = {
   schema: {
@@ -18,64 +20,47 @@ const DeleteFlowParams = Type.Object({
   id: Type.String()
 });
 
+// Asynchronous delete (TAMS spec). Deleting a flow with many segments takes
+// longer than the OSC ingress request timeout (~50-60s), so we do NOT delete
+// synchronously: we persist a Flow Delete Request (status `created`) and return
+// 202 with a Location header pointing at the request, and the in-process
+// deletion worker (started in server.ts) runs the per-batch delete + reclaim to
+// completion server-side. See spec DELETE_flows-flowId: "If Flow Segment
+// deletion takes too long then this request will return 202 Accepted and the
+// `Location` header will point to a Flow Delete Request to monitor deletion
+// progress".
 const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
   fastify.delete<{
-    Reply: Static<typeof Flow | typeof ErrorResponse> | undefined;
+    Reply: Static<typeof ErrorResponse> | Record<string, unknown> | undefined;
     Params: Static<typeof DeleteFlowParams>;
   }>('/flows/:id', opts, async (request, reply) => {
     const { id } = request.params;
-    const DBFlow = await withCouchRetry(() => flowsClient.get(id));
 
-    // Delete the flow's segments and reclaim their media objects BEFORE
-    // destroying the flow doc. If any of this fails (e.g. a transient CouchDB
-    // 503), the flow doc still exists, so the client can simply retry the
-    // DELETE and the operation resumes; the flow is only removed once its
-    // storage has actually been cleaned up. Destroying the flow first (the
-    // previous order) orphaned the segments and S3 objects with no way to reach
-    // them again when reclaim failed part-way.
-    //
-    // Batched delete: a Mango find with no limit returns only CouchDB's default
-    // page (25 docs), so a single-shot delete would orphan every segment beyond
-    // the first page. Loop until the flow has no segments left; each batch is
-    // deleted before the next find, so the just-deleted docs drop out of the
-    // results. Every CouchDB call is retried on transient 503/429.
-    const BATCH = 1000;
-    const objectIds: string[] = [];
-    for (;;) {
-      const batch = await withCouchRetry(() =>
-        segmentsClient.find({
-          selector: { flow_id: id },
-          fields: ['_id', '_rev', 'object_id'],
-          limit: BATCH
-        })
-      );
-      if (batch.docs.length === 0) break;
-      await withCouchRetry(() =>
-        segmentsClient.bulk({
-          docs: batch.docs.map((doc) => ({
-            _id: doc._id,
-            _rev: doc._rev,
-            _deleted: true
-          }))
-        })
-      );
-      for (const doc of batch.docs) {
-        if (doc.object_id) objectIds.push(doc.object_id);
+    // Flow must exist -> 404. (Read-only flows are still deletable: read_only
+    // guards content mutation, not deletion of the flow itself.)
+    try {
+      await flowsClient.get(id);
+    } catch (e: unknown) {
+      if ((e as { statusCode?: number }).statusCode === 404) {
+        throw httpError(404, `Flow "${id}" not found`);
       }
-      if (batch.docs.length < BATCH) break;
+      throw e;
     }
 
-    // Reclaim media objects no surviving segment (in any other flow) still
-    // references. Runs after the bulk deletes above so this flow's own segments
-    // no longer count as references. Best-effort: a failed object delete is
-    // logged, not fatal.
-    await reclaimUnreferencedObjects(objectIds);
+    const requestId = uuidv4();
+    const doc = buildDeletionRequestDoc({
+      id: requestId,
+      flow_id: id,
+      // The whole flow: an open ("_") timerange covers every segment.
+      timerange_to_delete: '_',
+      delete_flow: true
+    });
+    await deletionRequestsClient.insert(doc);
 
-    // Storage is clean: now remove the flow doc and announce the deletion.
-    await withCouchRetry(() => flowsClient.destroy(DBFlow._id, DBFlow._rev));
-    await notifyWebhooks('flows/deleted', { flow_id: id }, { flowId: id });
-
-    reply.code(204).send(undefined);
+    reply
+      .code(202)
+      .header('Location', `/flow-delete-requests/${requestId}`)
+      .send(stripDeletionRequest(doc));
   });
   next();
 };
