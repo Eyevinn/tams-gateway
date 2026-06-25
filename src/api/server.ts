@@ -2,6 +2,10 @@ import Logger from '../utils/Logger';
 import api from './api';
 import { initDatabases } from '../db/client';
 import { loadConfig } from '../config';
+import {
+  startDeletionWorker,
+  stopDeletionWorker
+} from './utils/deletionWorker';
 
 const initServer = async () => {
   // Validate required environment up front and fail fast on misconfiguration.
@@ -17,11 +21,19 @@ const initServer = async () => {
     enableUi: config.enableUi
   });
 
+  // Start the background deletion worker. It claims pending Flow Delete Requests
+  // (status `created`) and runs the per-batch delete + reclaim to completion, and
+  // on startup resumes any non-terminal request left behind by a previous
+  // process so a pod restart recovers. Assumes a single gateway pod (see
+  // deletionWorker.ts for the multi-pod follow-up).
+  startDeletionWorker();
+
   // Close the server cleanly on termination so rolling deploys drain in-flight
   // requests instead of dropping them.
   const shutdown = async (signal: string) => {
     Logger.black(`Received ${signal}, shutting down`);
     try {
+      stopDeletionWorker();
       await server.close();
       process.exit(0);
     } catch (err) {

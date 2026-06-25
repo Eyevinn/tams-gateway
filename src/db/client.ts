@@ -38,6 +38,15 @@ export const SEGMENTS_OBJECT_INDEX = {
   name: 'object-id'
 };
 
+// Mango index backing the deletion worker's status scan: it polls for
+// non-terminal requests (selector { status: { $in: ['created', 'started'] } })
+// to claim and resume. Without this index that scan is a full database scan of
+// flow_delete_requests on every poll.
+export const DELETION_REQUESTS_STATUS_INDEX = {
+  ddoc: 'delete-requests-status-index',
+  name: 'status'
+};
+
 const createDbIfMissing = async (name: string) => {
   try {
     await client.db.create(name);
@@ -75,6 +84,12 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
         index: { fields: ['object_id'] },
         ddoc: SEGMENTS_OBJECT_INDEX.ddoc,
         name: SEGMENTS_OBJECT_INDEX.name,
+        type: 'json'
+      });
+      await deletionRequestsClient.createIndex({
+        index: { fields: ['status'] },
+        ddoc: DELETION_REQUESTS_STATUS_INDEX.ddoc,
+        name: DELETION_REQUESTS_STATUS_INDEX.name,
         type: 'json'
       });
       return;
