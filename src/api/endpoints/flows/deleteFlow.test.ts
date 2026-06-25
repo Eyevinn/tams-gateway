@@ -150,6 +150,46 @@ describe('deleteFlow', () => {
     await app.close();
   });
 
+  it('paginates segment deletion so a flow with more than one page is fully cleaned', async () => {
+    // A Mango find with no limit returns only CouchDB's default page, so the
+    // delete must loop. Simulate two full pages (BATCH=1000) followed by a
+    // short final page; deleted docs drop out of subsequent finds, so the
+    // mock returns the next page each time it is asked for flow_id segments.
+    const BATCH = 1000;
+    const page = (start: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        _id: `s${start + i}`,
+        _rev: '1',
+        object_id: `bucket/obj-${start + i}`
+      }));
+    const pages = [page(0, BATCH), page(BATCH, BATCH), page(2 * BATCH, 5)];
+    let flowFindCall = 0;
+
+    segments.find.mockReset();
+    segments.find.mockImplementation(
+      async (query: { selector: Record<string, unknown> }) => {
+        if ('flow_id' in query.selector) {
+          return { docs: pages[flowFindCall++] ?? [] };
+        }
+        // No surviving references to any object.
+        return { docs: [] };
+      }
+    );
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'DELETE', url: '/flows/flow-1' });
+
+    expect(res.statusCode).toBe(204);
+    // Three pages => three bulk deletes; the loop stops on the short page.
+    expect(segments.bulk).toHaveBeenCalledTimes(3);
+    // Every object across all pages is reclaimed, not just the first page.
+    const reclaimed = s3Delete.mock.calls[0][0];
+    expect(reclaimed).toHaveLength(2 * BATCH + 5);
+    expect(reclaimed).toContain('bucket/obj-0');
+    expect(reclaimed).toContain(`bucket/obj-${2 * BATCH + 4}`);
+    await app.close();
+  });
+
   it('still returns 204 when object reclaim reports per-object errors', async () => {
     scriptFind([{ _id: 's1', _rev: '1', object_id: 'bucket/obj-1' }], {
       'bucket/obj-1': 0

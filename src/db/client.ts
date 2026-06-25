@@ -28,6 +28,16 @@ export const SEGMENTS_INDEX = {
   name: 'flow-ts-start'
 };
 
+// Mango index backing object-reclaim lookups: when a Flow or its segments are
+// deleted, reclaimObjects checks each candidate object_id for surviving
+// references (selector { object_id }). Without this index that check is a full
+// scan of the whole segments database per object, making deletion of a Flow
+// with many segments O(objects x segments) and unusably slow.
+export const SEGMENTS_OBJECT_INDEX = {
+  ddoc: 'segments-object-index',
+  name: 'object-id'
+};
+
 const createDbIfMissing = async (name: string) => {
   try {
     await client.db.create(name);
@@ -59,6 +69,12 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
         index: { fields: ['flow_id', 'ts_start'] },
         ddoc: SEGMENTS_INDEX.ddoc,
         name: SEGMENTS_INDEX.name,
+        type: 'json'
+      });
+      await segmentsClient.createIndex({
+        index: { fields: ['object_id'] },
+        ddoc: SEGMENTS_OBJECT_INDEX.ddoc,
+        name: SEGMENTS_OBJECT_INDEX.name,
         type: 'json'
       });
       return;
