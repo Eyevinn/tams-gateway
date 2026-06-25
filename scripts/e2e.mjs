@@ -7,7 +7,8 @@
 //   4. POST /flows/{id}/segments   register the segment
 //   5. GET  /flows/{id}/segments   list by timerange, get a presigned GET URL
 //   6. GET  <presigned url>        download and verify the bytes round-trip
-//   7. DELETE /flows/{id}          clean up
+//   7. DELETE /flows/{id}          start async delete (202 + Location)
+//   8. poll the flow-delete-request until done, then confirm the flow is gone
 //
 // Env: BASE_URL (default http://localhost:8000), API_TOKEN (optional).
 
@@ -45,6 +46,23 @@ const api = async (method, path, body) => {
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
   return res;
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Poll a flow-delete-request until it reaches a terminal status (done/error) or
+// the attempts run out. Returns the last observed status.
+const pollUntilTerminal = async (requestId, attempts = 30, delayMs = 500) => {
+  let status = 'unknown';
+  for (let i = 0; i < attempts; i++) {
+    const res = await api('GET', `/flow-delete-requests/${requestId}`);
+    if (res.status === 200) {
+      status = (await res.json()).status;
+      if (status === 'done' || status === 'error') return status;
+    }
+    await sleep(delayMs);
+  }
+  return status;
 };
 
 const run = async () => {
@@ -100,9 +118,40 @@ const run = async () => {
   const downloaded = await downloadRes.text();
   check(downloaded === payload, 'downloaded bytes match uploaded bytes');
 
-  // 7. Clean up
+  // 7. Delete the flow. Deletion is asynchronous (TAMS spec): the request
+  // returns 202 with a Location header pointing at a flow-delete-request, and
+  // an in-process worker runs the per-batch delete + reclaim to completion.
   const delRes = await api('DELETE', `/flows/${flowId}`);
-  check(delRes.status === 204, `DELETE flow -> ${delRes.status}`);
+  check(delRes.status === 202, `DELETE flow -> ${delRes.status}`);
+  const delReq = await delRes.json();
+  check(
+    delReq?.id && delReq.flow_id === flowId && delReq.delete_flow === true,
+    'DELETE flow returned a deletion-request body'
+  );
+  const location = delRes.headers.get('location');
+  check(
+    location === `/flow-delete-requests/${delReq.id}`,
+    `DELETE flow set Location -> ${location}`
+  );
+
+  // 8. Poll the flow-delete-request until the worker finishes (bounded retry),
+  // then confirm the async deletion actually completed end to end: the flow is
+  // gone and its media object is no longer downloadable.
+  const finalStatus = await pollUntilTerminal(delReq.id);
+  check(
+    finalStatus === 'done',
+    `delete request reached done -> ${finalStatus}`
+  );
+
+  const goneRes = await api('GET', `/flows/${flowId}`);
+  check(goneRes.status === 404, `GET deleted flow -> ${goneRes.status}`);
+
+  // The reclaimed object must no longer be downloadable from storage.
+  const orphanRes = await fetch(getUrl);
+  check(
+    orphanRes.status === 403 || orphanRes.status === 404,
+    `deleted object no longer downloadable -> ${orphanRes.status}`
+  );
 
   if (failures > 0) {
     console.error(`\nE2E FAILED (${failures} check(s) failed)`);
