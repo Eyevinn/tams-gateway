@@ -150,20 +150,29 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
         }
         const ids = [...byId.keys()];
 
-        // Fetch the current revision for every id in one request. _all_docs
-        // returns a row for a tombstoned id with value.deleted === true and the
-        // tombstone's rev, which we must reuse so a recreate-after-delete does
-        // not 409. A never-existed id comes back as an error row (not_found)
+        // Fetch the current revision for every id in one request. This MUST use
+        // fetchRevs (POST /_all_docs with the keys in the request body), not
+        // list({ keys }) which puts the keys in the query string: a real batch
+        // of segment ids overflows CouchDB's URL limit and the whole request
+        // fails with 414 URI Too Long (so every segment in the batch fails to
+        // register). POST /_all_docs has no such limit.
+        //
+        // _all_docs returns a row for a tombstoned id with value.deleted === true
+        // and the tombstone's rev, which we must reuse so a recreate-after-delete
+        // does not 409. A never-existed id comes back as an error row (not_found)
         // with no value, which we skip so the doc is inserted without a _rev.
         const existing = await withCouchRetry(() =>
-          segmentsClient.list({ keys: ids })
+          segmentsClient.fetchRevs({ keys: ids })
         );
 
         const revById = new Map<string, string>();
         for (const row of existing.rows) {
-          const value = (row as { value?: { rev?: string } }).value;
-          if (row.id && value?.rev) {
-            revById.set(row.id, value.rev);
+          // fetchRevs rows are a union of found rows ({ id, value.rev }, with
+          // value.deleted on a tombstone) and not_found rows ({ key, error });
+          // narrow both off one cast and keep only rows that carry a rev.
+          const r = row as { id?: string; value?: { rev?: string } };
+          if (r.id && r.value?.rev) {
+            revById.set(r.id, r.value.rev);
           }
         }
 
