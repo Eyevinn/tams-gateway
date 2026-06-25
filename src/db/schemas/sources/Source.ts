@@ -13,7 +13,10 @@ const Source = Type.Object({
   updated: Type.Optional(Type.String()),
   tags: Type.Optional(Type.Record(Type.String(), Type.String())),
   source_collection: Type.Optional(Type.Array(CollectionItem)),
-  collected_by: Type.Optional(Type.String())
+  // Array of Source ids per source.json (collected_by lists the Sources that
+  // collect this one). It is read-only / server-managed; the String typing
+  // mismatched the spec and the matching Flow.collected_by array.
+  collected_by: Type.Optional(Type.Array(Type.String()))
 });
 
 const DBSource = Type.Intersect([Source, DBProperties]);

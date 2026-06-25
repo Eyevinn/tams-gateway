@@ -228,4 +228,74 @@ describe('putFlow', () => {
     expect(typeof storedMapping.track_index).toBe('number');
     await app.close();
   });
+
+  it('derives the Source source_collection from flow_collection members', async () => {
+    // source.json + app note 0001: source_collection is server-managed and
+    // inferred from the Flow collection. Each member Flow is resolved to its
+    // own source_id, carrying the role from the flow_collection item.
+    const memberFlows: Record<string, { source_id: string }> = {
+      '00000000-0000-1000-8000-0000000000b0': {
+        source_id: '00000000-0000-1000-8000-0000000000c0'
+      },
+      '00000000-0000-1000-8000-0000000000b1': {
+        source_id: '00000000-0000-1000-8000-0000000000c1'
+      }
+    };
+    // The mux flow does not exist yet (404); member flows resolve to their docs.
+    flows.get.mockImplementation((flowId: string) => {
+      if (memberFlows[flowId]) {
+        return Promise.resolve({ _id: flowId, ...memberFlows[flowId] });
+      }
+      return Promise.reject({ statusCode: 404 });
+    });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual([
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' },
+      { id: '00000000-0000-1000-8000-0000000000c1', role: 'L' }
+    ]);
+    await app.close();
+  });
+
+  it('skips unresolved flow_collection members when deriving source_collection', async () => {
+    // Best-effort derivation: a member Flow not yet registered (404) is omitted
+    // rather than failing the whole PUT.
+    flows.get.mockImplementation((flowId: string) => {
+      if (flowId === '00000000-0000-1000-8000-0000000000b0') {
+        return Promise.resolve({
+          _id: flowId,
+          source_id: '00000000-0000-1000-8000-0000000000c0'
+        });
+      }
+      return Promise.reject({ statusCode: 404 });
+    });
+    flows.insert.mockResolvedValue({ ok: true });
+    sources.get.mockRejectedValue({ statusCode: 404 });
+    sources.insert.mockResolvedValue({ ok: true });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/flows/${multiFlow.id}`,
+      payload: multiFlow
+    });
+
+    expect(res.statusCode).toBe(201);
+    const storedSource = sources.insert.mock.calls[0][0];
+    expect(storedSource.source_collection).toEqual([
+      { id: '00000000-0000-1000-8000-0000000000c0', role: 'video' }
+    ]);
+    await app.close();
+  });
 });
