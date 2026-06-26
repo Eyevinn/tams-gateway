@@ -42,7 +42,12 @@ const DeletionRequestWorkerFields = Type.Object({
   // The object_id query filter from DELETE /flows/{id}/segments?object_id=...,
   // if any. The worker re-applies it to the segment selector so a resumed run
   // deletes exactly the same set the request was created for.
-  object_id_filter: Type.Optional(Type.String())
+  object_id_filter: Type.Optional(Type.String()),
+  // The source_id of the flow being deleted (only set for a delete_flow
+  // request). Captured at request creation, while the flow doc still exists, so
+  // the worker can reclaim a now-orphaned Source after destroying the flow even
+  // on a resumed run where the flow doc is already gone. See performDeletion.
+  source_id: Type.Optional(Type.String())
 });
 
 export const DBDeletionRequest = Type.Intersect([
@@ -54,7 +59,7 @@ export const DBDeletionRequest = Type.Intersect([
 export type DeletionRequestDoc = Static<typeof DBDeletionRequest>;
 
 // The internal worker-only field names (not part of deletion-request.json).
-export const WORKER_ONLY_FIELDS = ['object_id_filter'] as const;
+export const WORKER_ONLY_FIELDS = ['object_id_filter', 'source_id'] as const;
 
 // Project a persisted request doc to the spec deletion-request.json object:
 // drop CouchDB bookkeeping (_id/_rev) and the internal worker-only fields, so a
@@ -79,6 +84,7 @@ export const buildDeletionRequestDoc = (input: {
   timerange_to_delete: string;
   delete_flow: boolean;
   object_id_filter?: string;
+  source_id?: string;
   created_by?: string;
 }): DeletionRequestDoc => {
   const now = new Date().toISOString();
@@ -94,6 +100,7 @@ export const buildDeletionRequestDoc = (input: {
     ...(input.object_id_filter
       ? { object_id_filter: input.object_id_filter }
       : {}),
+    ...(input.source_id ? { source_id: input.source_id } : {}),
     ...(input.created_by ? { created_by: input.created_by } : {})
   };
 };

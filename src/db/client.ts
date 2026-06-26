@@ -28,6 +28,15 @@ export const SEGMENTS_INDEX = {
   name: 'flow-ts-start'
 };
 
+// Mango index backing the orphaned-Source check: after a Flow is deleted the
+// worker asks whether any surviving Flow still references the same source_id
+// (selector { source_id }) before reclaiming the Source. Without this index
+// that check is a full scan of the flows database per flow deletion.
+export const FLOWS_SOURCE_INDEX = {
+  ddoc: 'flows-source-index',
+  name: 'source-id'
+};
+
 // Mango index backing object-reclaim lookups: when a Flow or its segments are
 // deleted, reclaimObjects checks each candidate object_id for surviving
 // references (selector { object_id }). Without this index that check is a full
@@ -84,6 +93,12 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
         index: { fields: ['object_id'] },
         ddoc: SEGMENTS_OBJECT_INDEX.ddoc,
         name: SEGMENTS_OBJECT_INDEX.name,
+        type: 'json'
+      });
+      await flowsClient.createIndex({
+        index: { fields: ['source_id'] },
+        ddoc: FLOWS_SOURCE_INDEX.ddoc,
+        name: FLOWS_SOURCE_INDEX.name,
         type: 'json'
       });
       await deletionRequestsClient.createIndex({

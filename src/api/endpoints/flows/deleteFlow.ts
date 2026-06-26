@@ -38,8 +38,13 @@ const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
 
     // Flow must exist -> 404. (Read-only flows are still deletable: read_only
     // guards content mutation, not deletion of the flow itself.)
+    let sourceId: string | undefined;
     try {
-      await flowsClient.get(id);
+      const flow = await flowsClient.get(id);
+      // Capture source_id now, while the flow doc still exists, so the worker
+      // can reclaim a now-orphaned Source after destroying the flow even on a
+      // resumed run (which may execute long after this, when the flow is gone).
+      sourceId = flow.source_id;
     } catch (e: unknown) {
       if ((e as { statusCode?: number }).statusCode === 404) {
         throw httpError(404, `Flow "${id}" not found`);
@@ -53,7 +58,8 @@ const deleteFlow: FastifyPluginCallback = (fastify, _, next) => {
       flow_id: id,
       // The whole flow: an open ("_") timerange covers every segment.
       timerange_to_delete: '_',
-      delete_flow: true
+      delete_flow: true,
+      source_id: sourceId
     });
     await deletionRequestsClient.insert(doc);
 
