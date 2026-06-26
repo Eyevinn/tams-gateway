@@ -16,6 +16,34 @@ Node.js >= 20 ( LTS )
 A couchDB database (https://app.osaas.io/dashboard/service/apache-couchdb)  
 An S3 Storage (https://app.osaas.io/dashboard/service/minio-minio)
 
+## Deploy on Open Source Cloud
+
+TAMS Gateway is available as a managed service on
+[Eyevinn Open Source Cloud](https://app.osaas.io/dashboard/service/eyevinn-tams-gateway),
+so you can run it without setting up a local environment.
+
+### Option 1: One-click solution (recommended)
+
+The [TAMS Gateway solution](https://github.com/EyevinnOSC/terraform-examples/tree/main/examples/tams-pipeline)
+deploys the complete stack, the gateway plus its CouchDB segment index and a
+MinIO bucket for media, in a single step. You supply an instance name, a bucket
+name, and the MinIO and CouchDB credentials, and the solution provisions all
+three services and wires them together. This is the fastest way to a running
+gateway and is the recommended path.
+
+### Option 2: Manual setup
+
+If you prefer to provision the pieces yourself, the gateway needs two backing
+services, which you also run on Open Source Cloud:
+
+- A CouchDB database (https://app.osaas.io/dashboard/service/apache-couchdb) for the segment index.
+- An S3-compatible bucket on MinIO (https://app.osaas.io/dashboard/service/minio-minio) for the media segments. The `S3_BUCKET` must already exist.
+
+Create those two first, then deploy the gateway and point it at them with the
+same environment variables shown below. When the gateway runs behind the OSC
+ingress gate, leave `API_TOKEN` unset and let the gate authenticate callers (see
+[Authentication](#authentication)).
+
 ## Installation / Usage
 
 Install dependencies
