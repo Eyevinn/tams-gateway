@@ -61,6 +61,26 @@ describe('deleteFlow', () => {
     await app.close();
   });
 
+  it('captures the flow source_id on the request (worker-only, stripped from the body)', async () => {
+    flows.get.mockResolvedValue({
+      _id: 'flow-1',
+      _rev: '1-abc',
+      source_id: 'src-1'
+    });
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'DELETE', url: '/flows/flow-1' });
+
+    expect(res.statusCode).toBe(202);
+    // Persisted so the worker can reclaim an orphaned Source after the flow is
+    // gone, even on a resumed run.
+    expect(requests.insert.mock.calls[0][0].source_id).toBe('src-1');
+    // But source_id is a worker-only field, not part of the spec
+    // deletion-request object, so it never appears in the client response.
+    expect(res.json().source_id).toBeUndefined();
+    await app.close();
+  });
+
   it('returns 404 for an unknown flow and creates no request', async () => {
     flows.get.mockRejectedValue({ statusCode: 404 });
 

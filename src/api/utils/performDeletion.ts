@@ -26,6 +26,7 @@ import { MangoSelector } from 'nano';
 import { segmentsClient, flowsClient } from '../../db/client';
 import { DeletionRequestDoc } from '../../db/schemas/deletion-requests/DeletionRequest';
 import reclaimUnreferencedObjects from './reclaimObjects';
+import reclaimSourceIfOrphaned from './reclaimSource';
 import notifyWebhooks from './notifyWebhooks';
 import withCouchRetry from '../../db/withCouchRetry';
 import { parseTimeRange, toKey, formatTimeRange } from './timerange';
@@ -142,6 +143,13 @@ export const performDeletion = async (
       { flow_id: doc.flow_id },
       { flowId: doc.flow_id }
     );
+    // The flow is gone: if it was the last flow referencing its Source, reclaim
+    // the now-orphaned Source and emit sources/deleted. source_id was captured
+    // on the request at creation time (deleteFlow) so this works even when the
+    // flow doc was already deleted by a previous interrupted run.
+    if (doc.source_id) {
+      await reclaimSourceIfOrphaned(doc.source_id);
+    }
   } else if (deletedRange !== null) {
     // Segment-only deletion: the event timerange MUST intersect a deleted
     // segment, so only emit when something was actually deleted.

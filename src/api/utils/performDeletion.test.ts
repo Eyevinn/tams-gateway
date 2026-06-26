@@ -17,10 +17,15 @@ vi.mock('./notifyWebhooks', () => ({
   __esModule: true,
   default: vi.fn(async () => undefined)
 }));
+vi.mock('./reclaimSource', () => ({
+  __esModule: true,
+  default: vi.fn(async () => undefined)
+}));
 
 import { segmentsClient, flowsClient } from '../../db/client';
 import deleteS3Objects from './deleteS3Objects';
 import notifyWebhooks from './notifyWebhooks';
+import reclaimSourceIfOrphaned from './reclaimSource';
 import performDeletion from './performDeletion';
 import { DeletionRequestDoc } from '../../db/schemas/deletion-requests/DeletionRequest';
 
@@ -28,6 +33,7 @@ const segments = segmentsClient as unknown as { find: Mock; bulk: Mock };
 const flows = flowsClient as unknown as { get: Mock; destroy: Mock };
 const s3Delete = deleteS3Objects as unknown as Mock;
 const notify = notifyWebhooks as unknown as Mock;
+const reclaimSource = reclaimSourceIfOrphaned as unknown as Mock;
 
 const ts = (sec: number) =>
   (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
@@ -186,5 +192,40 @@ describe('performDeletion (per-batch delete + reclaim)', () => {
     expect(result.deleted).toBe(0);
     expect(segments.bulk).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('reclaims the orphaned Source after a flow delete (using the request source_id)', async () => {
+    scriptPages([[seg(0)]]);
+    const doc: DeletionRequestDoc = { ...flowDoc(), source_id: 'src-1' };
+
+    await performDeletion(doc);
+
+    expect(reclaimSource).toHaveBeenCalledWith('src-1');
+    // Source reclaim runs only after the flow doc is destroyed.
+    expect(reclaimSource.mock.invocationCallOrder[0]).toBeGreaterThan(
+      flows.destroy.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does not attempt Source reclaim when the request carries no source_id', async () => {
+    scriptPages([[seg(0)]]);
+
+    await performDeletion(flowDoc()); // flowDoc() has no source_id
+
+    expect(reclaimSource).not.toHaveBeenCalled();
+  });
+
+  it('does not attempt Source reclaim on a segment-only delete', async () => {
+    scriptPages([[seg(0), seg(2)]]);
+    const doc: DeletionRequestDoc = {
+      ...flowDoc(),
+      delete_flow: false,
+      source_id: 'src-1',
+      timerange_to_delete: '[0:0_4:0)'
+    };
+
+    await performDeletion(doc);
+
+    expect(reclaimSource).not.toHaveBeenCalled();
   });
 });
