@@ -1,6 +1,6 @@
 {
   "name": "@eyevinn/tams-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Time-addressable Media Store (TAMS) gateway: indexes segmented media flows and serves presigned S3 URLs.",
   "scripts": {
     "test": "vitest run",
