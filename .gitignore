@@ -4,3 +4,5 @@ node_modules/
 .claude
 # Derived by scripts/interop-coverage.ts (regenerated on each interop run)
 spec/.subset.json
+# Stamped into the Docker image at build time (see Dockerfile); never committed.
+build-time.txt

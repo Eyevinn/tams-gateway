@@ -27,10 +27,6 @@
   // current document so it works under any mount prefix.
   var API_BASE = new URL('../', window.location.href);
 
-  // Visible build stamp: bump on every UI change so a reload visibly confirms
-  // the browser picked up fresh JS (not a stale cached bundle).
-  var BUILD = 'build 2026-06-24 #29';
-
   var statusEl = document.getElementById('status');
   var viewEl = document.getElementById('view');
 
@@ -44,7 +40,6 @@
   }
 
   var buildEl = document.getElementById('build');
-  if (buildEl) buildEl.textContent = BUILD;
 
   // --- read-only fetch helpers (GET only) -----------------------------------
 
@@ -62,15 +57,19 @@
     });
   }
 
-  // Show the gateway's release version (from /service, sourced from package.json)
-  // alongside the UI build stamp. The build stamp stays as the cache-bust signal;
-  // the version is the human-facing release. Best-effort: on failure the footer
-  // just keeps the build stamp.
+  // Footer: the gateway's release version (from /service, sourced from
+  // package.json) and, when the image was built via Docker, its build time
+  // (svc.build, stamped by the Dockerfile). Nothing here is hand-maintained.
+  // Best-effort: on failure the footer just stays blank. JS-bundle freshness is
+  // handled by the server's Cache-Control: no-cache + ETag, not this stamp.
   if (buildEl) {
     getJson('service')
       .then(function (svc) {
         if (svc && svc.version) {
-          buildEl.textContent = 'TAMS Gateway v' + svc.version + ' · ' + BUILD;
+          buildEl.textContent =
+            'TAMS Gateway v' +
+            svc.version +
+            (svc.build ? ' · built ' + svc.build : '');
         }
       })
       .catch(function () {});

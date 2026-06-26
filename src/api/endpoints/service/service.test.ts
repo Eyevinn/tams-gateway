@@ -22,4 +22,17 @@ describe('getService', () => {
     expect(body.event_stream_mechanisms).toContainEqual({ name: 'webhooks' });
     await app.close();
   });
+
+  it('reports the dynamic gateway version and omits build outside a Docker build', async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/service' });
+
+    const body = res.json();
+    // version is sourced from package.json (semver-ish), never hardcoded here.
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+/);
+    // build is only stamped into the Docker image (build-time.txt); in dev and
+    // under test there is no such file, so the field is omitted entirely.
+    expect(body.build).toBeUndefined();
+    await app.close();
+  });
 });
