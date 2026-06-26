@@ -31,7 +31,7 @@ beforeEach(() => {
 
 describe('listFlows', () => {
   it('lists all flows via list() when no filters are given', async () => {
-    flows.list.mockResolvedValue({ rows: [{ doc: flow }] });
+    flows.list.mockResolvedValue({ rows: [{ id: flow.id, doc: flow }] });
 
     const app = buildApp();
     const res = await app.inject({ method: 'GET', url: '/flows' });
@@ -39,6 +39,26 @@ describe('listFlows', () => {
     expect(res.statusCode).toBe(200);
     expect(flows.list).toHaveBeenCalledTimes(1);
     expect(flows.find).not.toHaveBeenCalled();
+    expect(res.json()).toEqual([flow]);
+    await app.close();
+  });
+
+  it('excludes CouchDB design documents from the unfiltered listing', async () => {
+    // _all_docs returns Mango index docs at _design/*; they are not Flows.
+    flows.list.mockResolvedValue({
+      rows: [
+        {
+          id: '_design/flows-source-index',
+          doc: { _id: '_design/flows-source-index', views: {} }
+        },
+        { id: 'flow-1', doc: flow }
+      ]
+    });
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/flows' });
+
+    expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([flow]);
     await app.close();
   });

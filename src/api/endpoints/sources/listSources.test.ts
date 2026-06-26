@@ -27,7 +27,9 @@ vi.mock('../../../db/client', () => {
       return { ok: true, id: doc._id, rev: '1-test' };
     }),
     list: vi.fn(async () => ({
-      rows: [...store.values()].map((doc) => ({ doc }))
+      // Mirror CouchDB _all_docs: each row carries the document id alongside the
+      // doc (design docs included), so listSources can filter _design/* out.
+      rows: [...store.values()].map((doc) => ({ id: doc._id as string, doc }))
     }))
   });
   return {
@@ -89,6 +91,23 @@ describe('Source/Flow linkage via GET /sources', () => {
     });
     expect(sources[0]._id).toBeUndefined();
     expect(sources[0]._rev).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('excludes CouchDB design documents from GET /sources', async () => {
+    // A Mango index lives at _design/* in the same database; _all_docs returns
+    // it, but it is not a Source and must not leak into the listing.
+    sourceDocs.set('_design/sources-index', {
+      _id: '_design/sources-index',
+      views: {}
+    });
+
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/sources' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
 
     await app.close();
   });
