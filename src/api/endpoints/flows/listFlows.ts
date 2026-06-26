@@ -80,8 +80,15 @@ const listFlows: FastifyPluginCallback = (fastify, _, next) => {
       const result = await flowsClient.find({ selector, limit: FIND_LIMIT });
       docs = result.docs;
     } else {
+      // _all_docs (nano list) includes CouchDB design documents (Mango indexes
+      // live at _design/* in the same database). They are not Flows, so drop
+      // them; otherwise an index doc leaks into GET /flows as a bogus entry.
+      // (The find() path above cannot return them: they match no field selector.)
       const DBFlows = await flowsClient.list({ include_docs: true });
-      docs = DBFlows.rows.map((row) => row.doc).filter((doc) => !!doc);
+      docs = DBFlows.rows
+        .filter((row) => !row.id.startsWith('_design/'))
+        .map((row) => row.doc)
+        .filter((doc) => !!doc);
     }
 
     reply
