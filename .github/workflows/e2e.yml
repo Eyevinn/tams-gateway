@@ -21,7 +21,7 @@ jobs:
       PORT: '8000'
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
