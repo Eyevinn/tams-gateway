@@ -45,8 +45,8 @@ importers:
         specifier: ^5.5.2
         version: 5.5.2
       '@smithy/url-parser':
-        specifier: ^4.4.2
-        version: 4.4.2
+        specifier: ^4.4.16
+        version: 4.4.16
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -788,8 +788,8 @@ packages:
     resolution: {integrity: sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==}
     engines: {node: '>=18.0.0'}
 
-  '@smithy/url-parser@4.4.2':
-    resolution: {integrity: sha512-vx7FUYJMRfQqdqPRLYwpisOuYU6e1PaabcPUTEc7xG6X0VEr4B6PnjZloHz67qva0pQ9/eNs3xPxvQ6w5gRGAw==}
+  '@smithy/url-parser@4.4.16':
+    resolution: {integrity: sha512-0VynNn3o4qSpRbgtG6RbT09wsN2HjsIkBvxHUX99p0t3sFj7hvqsOtPQBubawSNH4PWfwXgkD82vG166ROta7w==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/util-buffer-from@2.2.0':
@@ -2748,9 +2748,9 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@smithy/url-parser@4.4.2':
+  '@smithy/url-parser@4.4.16':
     dependencies:
-      '@smithy/core': 3.26.0
+      '@smithy/core': 3.31.1
       tslib: 2.8.1
 
   '@smithy/util-buffer-from@2.2.0':
