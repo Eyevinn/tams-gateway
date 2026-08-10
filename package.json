@@ -27,7 +27,7 @@
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^6.0.0",
     "@fastify/type-provider-typebox": "^6.1.0",
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.52",
     "@smithy/hash-node": "^4.4.16",
     "@smithy/protocol-http": "^5.5.16",
     "@smithy/url-parser": "^4.4.16",
