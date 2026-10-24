@@ -12,7 +12,7 @@
 
 ## Requirements
 
-Node.js >= 20 ( LTS )  
+Node.js ^22.23.4 or >= 24.22.1 ( LTS )  
 A couchDB database (https://app.osaas.io/dashboard/service/apache-couchdb)  
 An S3 Storage (https://app.osaas.io/dashboard/service/minio-minio)
 
