@@ -24,6 +24,7 @@
 
 import { MangoSelector } from 'nano';
 import { segmentsClient, flowsClient } from '../../db/client';
+import { deleteMaxSegmentDuration } from './segmentLookback';
 import { DeletionRequestDoc } from '../../db/schemas/deletion-requests/DeletionRequest';
 import reclaimUnreferencedObjects from './reclaimObjects';
 import reclaimSourceIfOrphaned from './reclaimSource';
@@ -138,6 +139,8 @@ export const performDeletion = async (
     } catch (e: unknown) {
       if ((e as { statusCode?: number }).statusCode !== 404) throw e;
     }
+    // All of the flow's segments are gone; drop its recorded longest segment.
+    await deleteMaxSegmentDuration(doc.flow_id);
     await notifyWebhooks(
       'flows/deleted',
       { flow_id: doc.flow_id },

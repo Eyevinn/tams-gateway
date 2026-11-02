@@ -4,7 +4,8 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 vi.mock('../../../db/client', () => ({
   flowsClient: { get: vi.fn() },
-  segmentsClient: { find: vi.fn() }
+  segmentsClient: { find: vi.fn() },
+  segmentMetaClient: { get: vi.fn() }
 }));
 vi.mock('../../utils/createS3URL', () => ({
   __esModule: true,
@@ -13,11 +14,16 @@ vi.mock('../../utils/createS3URL', () => ({
   )
 }));
 
-import { flowsClient, segmentsClient } from '../../../db/client';
+import {
+  flowsClient,
+  segmentMetaClient,
+  segmentsClient
+} from '../../../db/client';
 import getHlsPlaylist from './getHlsPlaylist';
 
 const flows = flowsClient as unknown as { get: Mock };
 const segments = segmentsClient as unknown as { find: Mock };
+const meta = segmentMetaClient as unknown as { get: Mock };
 
 const HLS_CONTENT_TYPE = 'application/vnd.apple.mpegurl';
 
@@ -45,6 +51,9 @@ const buildApp = (): FastifyInstance => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // No recorded longest segment unless a test installs one.
+  meta.get.mockReset();
+  meta.get.mockRejectedValue({ statusCode: 404 });
 });
 
 describe('getHlsPlaylist', () => {
@@ -189,6 +198,28 @@ describe('getHlsPlaylist', () => {
     expect(res.statusCode).toBe(200);
     // ENDLIST so hls.js plays the window and stops polling (no manifest hammer).
     expect(res.body).toContain('#EXT-X-ENDLIST');
+    await app.close();
+  });
+
+  it('bounds ts_start from below by the flow longest segment for a timerange', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    meta.get.mockResolvedValue({
+      _id: 'flow-1',
+      max_ns: (10n * 1_000_000_000n).toString()
+    });
+    segments.find.mockResolvedValue({ docs: [] });
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B100%3A0_110%3A0%29'
+    });
+
+    expect(res.statusCode).toBe(200);
+    // The main query is the last find call (after the recency probe).
+    const selector = segments.find.mock.calls.at(-1)?.[0].selector;
+    expect(selector.ts_start).toEqual({ $lt: ns(110), $gte: ns(90) });
+    expect(selector.ts_end).toEqual({ $gt: ns(100) });
     await app.close();
   });
 });

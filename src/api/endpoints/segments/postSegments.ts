@@ -6,6 +6,7 @@ import { segmentsClient } from '../../../db/client';
 import { segmentKeys } from '../../utils/timerange';
 import withCouchRetry from '../../../db/withCouchRetry';
 import notifyWebhooks from '../../utils/notifyWebhooks';
+import { raiseMaxSegmentDuration } from '../../utils/segmentLookback';
 
 // A single segment or an array of segments, per the TAMS spec.
 const PostSegmentsBody = Type.Union([Segment, Type.Array(Segment)]);
@@ -144,6 +145,16 @@ const postSegments: FastifyPluginCallback = (fastify, _, next) => {
         // Two ids in one batch can collapse to the same _id (same flow, start
         // and object). _bulk_docs rejects duplicate _ids within one request, so
         // keep the last write per _id and key the existing-rev lookup by _id.
+        // Record the batch's longest duration on the flow before any segment is
+        // written, so timerange queries never use a bound shorter than a stored
+        // segment. A failure here fails the batch (caught below).
+        let batchMax = 0n;
+        for (const { doc } of prepared) {
+          const d = BigInt(doc.ts_end) - BigInt(doc.ts_start);
+          if (d > batchMax) batchMax = d;
+        }
+        await raiseMaxSegmentDuration(id, batchMax);
+
         const byId = new Map<string, PreparedSegment>();
         for (const p of prepared) {
           byId.set(p.doc._id, p);

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 
 vi.mock('../../db/client', () => ({
   segmentsClient: { find: vi.fn(), bulk: vi.fn() },
-  flowsClient: { get: vi.fn(), destroy: vi.fn() }
+  flowsClient: { get: vi.fn(), destroy: vi.fn() },
+  segmentMetaClient: { get: vi.fn(), destroy: vi.fn() }
 }));
 vi.mock('../../db/withCouchRetry', () => ({
   __esModule: true,
@@ -22,7 +23,11 @@ vi.mock('./reclaimSource', () => ({
   default: vi.fn(async () => undefined)
 }));
 
-import { segmentsClient, flowsClient } from '../../db/client';
+import {
+  segmentsClient,
+  flowsClient,
+  segmentMetaClient
+} from '../../db/client';
 import deleteS3Objects from './deleteS3Objects';
 import notifyWebhooks from './notifyWebhooks';
 import reclaimSourceIfOrphaned from './reclaimSource';
@@ -31,6 +36,7 @@ import { DeletionRequestDoc } from '../../db/schemas/deletion-requests/DeletionR
 
 const segments = segmentsClient as unknown as { find: Mock; bulk: Mock };
 const flows = flowsClient as unknown as { get: Mock; destroy: Mock };
+const meta = segmentMetaClient as unknown as { get: Mock; destroy: Mock };
 const s3Delete = deleteS3Objects as unknown as Mock;
 const notify = notifyWebhooks as unknown as Mock;
 const reclaimSource = reclaimSourceIfOrphaned as unknown as Mock;
@@ -75,6 +81,11 @@ beforeEach(() => {
   segments.bulk.mockResolvedValue([{ ok: true }]);
   flows.get.mockResolvedValue({ _id: 'flow-1', _rev: '1-abc' });
   flows.destroy.mockResolvedValue({ ok: true });
+  meta.get.mockResolvedValue({
+    _id: 'flow-1',
+    _rev: '1-m'
+  });
+  meta.destroy.mockResolvedValue({ ok: true });
   s3Delete.mockResolvedValue({ deleted: [], errors: [] });
 });
 
@@ -111,6 +122,8 @@ describe('performDeletion (per-batch delete + reclaim)', () => {
     await performDeletion(flowDoc());
 
     expect(flows.destroy).toHaveBeenCalledWith('flow-1', '1-abc');
+    expect(meta.get).toHaveBeenCalledWith('flow-1');
+    expect(meta.destroy).toHaveBeenCalledWith('flow-1', '1-m');
     expect(notify).toHaveBeenCalledWith(
       'flows/deleted',
       { flow_id: 'flow-1' },
@@ -121,6 +134,58 @@ describe('performDeletion (per-batch delete + reclaim)', () => {
       s3Delete.mock.invocationCallOrder[0]
     );
   });
+
+  it('still completes the flow delete when no longest-segment record exists', async () => {
+    scriptPages([[seg(0)]]);
+    meta.get.mockRejectedValue({ statusCode: 404 });
+
+    await performDeletion(flowDoc());
+
+    expect(meta.destroy).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      'flows/deleted',
+      { flow_id: 'flow-1' },
+      { flowId: 'flow-1' }
+    );
+  });
+
+  it('re-reads and retries removing the record when a registration raised it meanwhile (409)', async () => {
+    scriptPages([[seg(0)]]);
+    meta.get
+      .mockResolvedValueOnce({ _id: 'flow-1', _rev: '1-m' })
+      .mockResolvedValueOnce({ _id: 'flow-1', _rev: '2-m' });
+    meta.destroy.mockRejectedValueOnce({ statusCode: 409 });
+
+    await performDeletion(flowDoc());
+
+    expect(meta.destroy).toHaveBeenCalledTimes(2);
+    expect(meta.destroy).toHaveBeenLastCalledWith('flow-1', '2-m');
+    expect(notify).toHaveBeenCalledWith(
+      'flows/deleted',
+      { flow_id: 'flow-1' },
+      { flowId: 'flow-1' }
+    );
+  });
+
+  it.each([
+    ['conflicts every time', { statusCode: 409 }],
+    ['fails with another error', new Error('couch down')]
+  ])(
+    'still completes the deletion when removing the record %s',
+    async (_name, failure) => {
+      scriptPages([[seg(0)]]);
+      meta.destroy.mockRejectedValue(failure);
+
+      await performDeletion({ ...flowDoc(), source_id: 'src-1' });
+
+      expect(notify).toHaveBeenCalledWith(
+        'flows/deleted',
+        { flow_id: 'flow-1' },
+        { flowId: 'flow-1' }
+      );
+      expect(reclaimSource).toHaveBeenCalledWith('src-1');
+    }
+  );
 
   it('leaves no orphaned objects for COMPLETED batches when interrupted mid-run', async () => {
     const BATCH = 1000;
