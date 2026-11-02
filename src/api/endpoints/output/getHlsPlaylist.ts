@@ -6,6 +6,7 @@ import ErrorResponse from '../../utils/error-response';
 import createS3URL from '../../utils/createS3URL';
 import { overlapBounds, toKey } from '../../utils/timerange';
 import httpError from '../../utils/http-error';
+import { lookbackStartKey } from '../../utils/segmentLookback';
 import { buildMediaPlaylist, HlsSegment } from '../../utils/hlsManifest';
 import {
   DEFAULT_HLS_URL_TTL,
@@ -189,6 +190,14 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
       }
       if (bounds.endAbove !== null) {
         selector.ts_end = { [bounds.endOp]: bounds.endAbove };
+        // Same lower bound as listSegments (see segmentLookback).
+        const lookback = lookbackStartKey(flow, bounds.endAbove);
+        if (lookback !== null) {
+          selector.ts_start = {
+            ...(selector.ts_start as Record<string, string> | undefined),
+            $gte: lookback
+          };
+        }
       }
     }
 

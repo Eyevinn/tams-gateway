@@ -42,6 +42,15 @@ const Flow = Type.Object(
   { additionalProperties: false }
 );
 
-const DBFlow = Type.Intersect([Flow, DBProperties]);
+// Internal, not part of the TAMS Flow (stripped by stripDbFields): duration in
+// nanoseconds (decimal string) of the longest segment registered for the flow.
+// Absent means unknown; see api/utils/segmentLookback.ts.
+const MAX_SEGMENT_DURATION_FIELD = 'max_segment_duration_ns';
 
-export { Flow, DBFlow };
+const DBFlow = Type.Intersect([
+  Flow,
+  DBProperties,
+  Type.Object({ [MAX_SEGMENT_DURATION_FIELD]: Type.Optional(Type.String()) })
+]);
+
+export { Flow, DBFlow, MAX_SEGMENT_DURATION_FIELD };
