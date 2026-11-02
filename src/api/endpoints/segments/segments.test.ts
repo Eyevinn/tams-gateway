@@ -11,6 +11,8 @@ vi.mock('../../../db/client', () => ({
     fetchRevs: vi.fn(),
     bulk: vi.fn()
   },
+  // Flow record holding the per-flow longest-segment bound.
+  flowsClient: { get: vi.fn(), insert: vi.fn() },
   // notifyWebhooks queries this; no subscribers in these tests.
   webhooksClient: { find: vi.fn().mockResolvedValue({ docs: [] }) }
 }));
@@ -19,7 +21,7 @@ vi.mock('../../utils/createS3URL', () => ({
   default: vi.fn(async () => 'https://s3.example/signed')
 }));
 
-import { segmentsClient } from '../../../db/client';
+import { segmentsClient, flowsClient } from '../../../db/client';
 import postSegments from './postSegments';
 import listSegments from './listSegments';
 
@@ -30,6 +32,8 @@ const mockClient = segmentsClient as unknown as {
   fetchRevs: Mock;
   bulk: Mock;
 };
+
+const mockFlows = flowsClient as unknown as { get: Mock; insert: Mock };
 
 // An _all_docs (list with keys) response. By default every requested id is
 // absent (a not_found error row with no value), so the handler inserts without
@@ -60,7 +64,30 @@ const buildApp = (plugin: FastifyPluginCallback): FastifyInstance => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // By default the flow record does not exist (404), so no bound applies and
+  // nothing is recorded; tests that care install a flow with mockFlow().
+  mockFlows.get.mockReset();
+  mockFlows.get.mockRejectedValue({ statusCode: 404 });
+  mockFlows.insert.mockReset();
+  mockFlows.insert.mockResolvedValue({ ok: true, rev: '2-x' });
 });
+
+const SEC = 1_000_000_000n;
+const key = (sec: number | bigint) =>
+  (BigInt(sec) * SEC).toString().padStart(20, '0');
+
+// Install a flow record; maxSec undefined means no recorded maximum yet.
+const mockFlow = (maxSec?: number) =>
+  mockFlows.get.mockResolvedValue({
+    _id: 'flow-1',
+    _rev: '1-a',
+    id: 'flow-1',
+    source_id: 's',
+    format: 'urn:x-nmos:format:video',
+    ...(maxSec === undefined
+      ? {}
+      : { max_segment_duration_ns: (BigInt(maxSec) * SEC).toString() })
+  });
 
 describe('postSegments', () => {
   it('upserts a new segment with derived flow_id and keys', async () => {
@@ -538,5 +565,330 @@ describe('listSegments paging', () => {
       $gte: cursor
     });
     await app.close();
+  });
+});
+
+// A minimal Mango evaluator (equality, $lt/$lte/$gt/$gte on string keys, sort by
+// ts_start, limit) so the tests check which segments a query actually returns.
+const storedSegment = (id: string, startSec: number, durSec: number) => ({
+  object_id: id,
+  timerange: `[${startSec}:0_${startSec + durSec}:0)`,
+  flow_id: 'flow-1',
+  ts_start: key(startSec),
+  ts_end: key(startSec + durSec)
+});
+
+const useStore = (docs: ReturnType<typeof storedSegment>[]) => {
+  mockClient.find.mockImplementation(
+    async ({
+      selector,
+      sort,
+      limit
+    }: {
+      selector: Record<string, unknown>;
+      sort: Array<Record<string, string>>;
+      limit: number;
+    }) => {
+      const cmp: Record<string, (a: string, b: string) => boolean> = {
+        $lt: (a, b) => a < b,
+        $lte: (a, b) => a <= b,
+        $gt: (a, b) => a > b,
+        $gte: (a, b) => a >= b
+      };
+      const rows = docs.filter((doc) =>
+        Object.entries(selector).every(([field, cond]) => {
+          const v = (doc as Record<string, string>)[field];
+          if (typeof cond !== 'object' || cond === null) return v === cond;
+          return Object.entries(cond as Record<string, string>).every(
+            ([op, bound]) => cmp[op](v, bound)
+          );
+        })
+      );
+      const desc = sort?.[1]?.ts_start === 'desc';
+      rows.sort((a, b) =>
+        desc
+          ? b.ts_start.localeCompare(a.ts_start)
+          : a.ts_start.localeCompare(b.ts_start)
+      );
+      return { docs: rows.slice(0, limit) };
+    }
+  );
+};
+
+describe('listSegments lookback bound', () => {
+  const list = async (query: string) => {
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?${query}`
+    });
+    await app.close();
+    return res;
+  };
+  const ids = (res: { json: () => Array<{ object_id: string }> }) =>
+    res.json().map((s) => s.object_id);
+  const selectorOf = () => mockClient.find.mock.calls[0][0].selector;
+
+  // Longest stored segment is 100 s (the spanning one); window is [150, 160).
+  const fixture = () =>
+    useStore([
+      storedSegment('spanning', 0, 100),
+      storedSegment('long-after-start', 80, 100),
+      storedSegment('before', 100, 10),
+      storedSegment('touches-start', 140, 10),
+      storedSegment('inside', 152, 2),
+      storedSegment('at-end', 160, 2),
+      storedSegment('after', 170, 10)
+    ]);
+
+  it('adds ts_start >= window start - longest to the query', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list('timerange=[150:0_160:0)');
+    expect(selectorOf().ts_start).toEqual({
+      $lt: key(160),
+      $gte: key(50)
+    });
+    expect(selectorOf().ts_end).toEqual({ $gt: key(150) });
+  });
+
+  it('returns exactly the overlapping segments, including a long one that starts well before the window', async () => {
+    mockFlow(100);
+    fixture();
+    const res = await list('timerange=[150:0_160:0)');
+    expect(ids(res)).toEqual(['long-after-start', 'inside']);
+  });
+
+  it('returns the same segments without a recorded maximum (unbounded fallback)', async () => {
+    mockFlow(undefined);
+    fixture();
+    const res = await list('timerange=[150:0_160:0)');
+    expect(selectorOf().ts_start).toEqual({ $lt: key(160) });
+    expect(ids(res)).toEqual(['long-after-start', 'inside']);
+  });
+
+  it('falls back to the unbounded query when the flow record is missing', async () => {
+    fixture();
+    const res = await list('timerange=[150:0_160:0)');
+    expect(res.statusCode).toBe(200);
+    expect(selectorOf().ts_start).toEqual({ $lt: key(160) });
+  });
+
+  it('keeps a segment starting exactly at the bound and drops one ending exactly at the window start', async () => {
+    mockFlow(10);
+    useStore([
+      // Starts exactly at window start - longest, ends 1 ns after window start.
+      {
+        ...storedSegment('edge-in', 90, 10),
+        ts_end: key(100).replace(/0$/, '1')
+      },
+      // Ends exactly at the window start: no overlap.
+      storedSegment('edge-out', 90, 10)
+    ]);
+    const res = await list('timerange=[100:0_110:0)');
+    expect(selectorOf().ts_start).toEqual({ $lt: key(110), $gte: key(90) });
+    expect(ids(res)).toEqual(['edge-in']);
+  });
+
+  it('omits the bound when it would fall at or before the epoch', async () => {
+    mockFlow(1000);
+    useStore([]);
+    await list('timerange=[5:0_15:0)');
+    expect(selectorOf().ts_start).toEqual({ $lt: key(15) });
+  });
+
+  it('applies no bound and reads no flow for an open-start window', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list('timerange=_15:0)');
+    expect(selectorOf().ts_start).toEqual({ $lt: key(15) });
+    expect(mockFlows.get).not.toHaveBeenCalled();
+  });
+
+  it('reads no flow without a timerange', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list('limit=5');
+    expect(mockFlows.get).not.toHaveBeenCalled();
+  });
+
+  it('works with reverse_order', async () => {
+    mockFlow(100);
+    fixture();
+    const res = await list('timerange=[150:0_160:0)&reverse_order=true');
+    expect(selectorOf().ts_start).toEqual({ $lt: key(160), $gte: key(50) });
+    expect(ids(res)).toEqual(['inside', 'long-after-start']);
+  });
+
+  it('keeps the lookback bound when the page cursor is below it (ascending)', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list(`timerange=[150:0_160:0)&page=${key(10)}`);
+    expect(selectorOf().ts_start).toEqual({ $lt: key(160), $gte: key(50) });
+  });
+
+  it('uses the page cursor when it is above the lookback bound (ascending)', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list(`timerange=[150:0_160:0)&page=${key(152)}`);
+    expect(selectorOf().ts_start).toEqual({ $lt: key(160), $gte: key(152) });
+  });
+
+  it('keeps the lookback bound alongside a descending cursor', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list(`timerange=[150:0_160:0)&reverse_order=true&page=${key(152)}`);
+    expect(selectorOf().ts_start).toEqual({
+      $lt: key(160),
+      $gte: key(50),
+      $lte: key(152)
+    });
+  });
+
+  it('does not let a descending cursor widen an inclusive-end window', async () => {
+    mockFlow(100);
+    useStore([]);
+    await list(`timerange=[150:0_160:0]&reverse_order=true&page=${key(999)}`);
+    expect(selectorOf().ts_start.$lte).toBe(key(160));
+  });
+});
+
+describe('postSegments records the longest segment duration', () => {
+  const post = async (payload: unknown) => {
+    const app = buildApp(postSegments);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/flows/flow-1/segments',
+      payload: payload as object
+    });
+    await app.close();
+    return res;
+  };
+  const okBulk = () => {
+    mockClient.fetchRevs.mockImplementation(
+      async ({ keys }: { keys: string[] }) => allDocsResponse(keys)
+    );
+    mockClient.bulk.mockImplementation(async ({ docs }) => bulkOk(docs));
+  };
+  const insertedMax = () => mockFlows.insert.mock.calls.at(-1)?.[0];
+
+  it('records the batch maximum on a new flow, before the segments are written', async () => {
+    okBulk();
+    mockFlow(undefined);
+    mockClient.find.mockResolvedValue({ docs: [] });
+    const res = await post([
+      { object_id: 'a', timerange: '[0:0_2:0)' },
+      { object_id: 'b', timerange: '[2:0_12:0)' }
+    ]);
+    expect(res.statusCode).toBe(201);
+    expect(insertedMax().max_segment_duration_ns).toBe((10n * SEC).toString());
+    expect(mockFlows.insert.mock.invocationCallOrder[0]).toBeLessThan(
+      mockClient.bulk.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('includes an older, longer stored segment when no maximum was recorded yet', async () => {
+    okBulk();
+    mockFlow(undefined);
+    mockClient.find.mockResolvedValue({
+      docs: [
+        { ts_start: key(0), ts_end: key(60) },
+        { ts_start: key(60), ts_end: key(62) }
+      ]
+    });
+    await post({ object_id: 'a', timerange: '[100:0_102:0)' });
+    expect(insertedMax().max_segment_duration_ns).toBe((60n * SEC).toString());
+  });
+
+  it('pages through the stored segments when scanning', async () => {
+    okBulk();
+    mockFlow(undefined);
+    const page = (n: number, durSec: number) =>
+      Array.from({ length: n }, () => ({
+        ts_start: key(0),
+        ts_end: key(durSec)
+      }));
+    mockClient.find
+      .mockResolvedValueOnce({ docs: page(1000, 2), bookmark: 'b1' })
+      .mockResolvedValueOnce({ docs: page(3, 30), bookmark: 'b2' });
+    await post({ object_id: 'a', timerange: '[100:0_102:0)' });
+    expect(mockClient.find).toHaveBeenCalledTimes(2);
+    expect(mockClient.find.mock.calls[1][0].bookmark).toBe('b1');
+    expect(insertedMax().max_segment_duration_ns).toBe((30n * SEC).toString());
+  });
+
+  it('does not write the flow for a segment no longer than the recorded maximum', async () => {
+    okBulk();
+    mockFlow(10);
+    const res = await post({ object_id: 'a', timerange: '[0:0_10:0)' });
+    expect(res.statusCode).toBe(201);
+    expect(mockFlows.insert).not.toHaveBeenCalled();
+    expect(mockClient.find).not.toHaveBeenCalled();
+  });
+
+  it('raises the maximum for a longer segment', async () => {
+    okBulk();
+    mockFlow(10);
+    await post({ object_id: 'a', timerange: '[0:0_30:0)' });
+    expect(insertedMax().max_segment_duration_ns).toBe((30n * SEC).toString());
+  });
+
+  it('re-reads on a conflict and never lowers a value raised concurrently', async () => {
+    okBulk();
+    mockFlows.get
+      .mockResolvedValueOnce({
+        _id: 'flow-1',
+        _rev: '1-a',
+        max_segment_duration_ns: (5n * SEC).toString()
+      })
+      .mockResolvedValueOnce({
+        _id: 'flow-1',
+        _rev: '2-b',
+        max_segment_duration_ns: (60n * SEC).toString()
+      });
+    mockFlows.insert.mockRejectedValueOnce({ statusCode: 409 });
+    const res = await post({ object_id: 'a', timerange: '[0:0_10:0)' });
+    expect(res.statusCode).toBe(201);
+    // The concurrent writer's larger value already covers this segment.
+    expect(mockFlows.insert).toHaveBeenCalledTimes(1);
+    expect(mockClient.bulk).toHaveBeenCalled();
+  });
+
+  it('retries a conflict with the fresh revision', async () => {
+    okBulk();
+    mockFlows.get
+      .mockResolvedValueOnce({
+        _id: 'flow-1',
+        _rev: '1-a',
+        max_segment_duration_ns: '5'
+      })
+      .mockResolvedValueOnce({
+        _id: 'flow-1',
+        _rev: '2-b',
+        max_segment_duration_ns: '7'
+      });
+    mockFlows.insert.mockRejectedValueOnce({ statusCode: 409 });
+    await post({ object_id: 'a', timerange: '[0:0_10:0)' });
+    expect(mockFlows.insert).toHaveBeenCalledTimes(2);
+    expect(mockFlows.insert.mock.calls[1][0]._rev).toBe('2-b');
+    expect(insertedMax().max_segment_duration_ns).toBe((10n * SEC).toString());
+  });
+
+  it('fails the batch without writing segments when the maximum cannot be recorded', async () => {
+    okBulk();
+    mockFlow(1);
+    mockFlows.insert.mockRejectedValue({ statusCode: 409 });
+    const res = await post({ object_id: 'a', timerange: '[0:0_10:0)' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().failed_segments).toHaveLength(1);
+    expect(mockClient.bulk).not.toHaveBeenCalled();
+  });
+
+  it('still registers segments when the flow record does not exist', async () => {
+    okBulk();
+    const res = await post({ object_id: 'a', timerange: '[0:0_10:0)' });
+    expect(res.statusCode).toBe(201);
+    expect(mockFlows.insert).not.toHaveBeenCalled();
+    expect(mockClient.bulk).toHaveBeenCalled();
   });
 });

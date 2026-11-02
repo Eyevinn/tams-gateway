@@ -7,6 +7,10 @@ import Segment from '../../../db/schemas/segments/Segment';
 import createS3URL from '../../utils/createS3URL';
 import { overlapBounds, formatTimeRange } from '../../utils/timerange';
 import httpError from '../../utils/http-error';
+import {
+  getFlowForLookback,
+  lookbackStartKey
+} from '../../utils/segmentLookback';
 
 const SegmentsArray = Type.Array(Segment);
 
@@ -117,6 +121,19 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
       }
       if (bounds.endAbove !== null) {
         selector.ts_end = { [bounds.endOp]: bounds.endAbove };
+        // Bound ts_start from below by the flow's longest segment so the index
+        // read does not start at the beginning of the flow. Null (no recorded
+        // maximum, or a missing flow) leaves the query unbounded.
+        const lookback = lookbackStartKey(
+          await getFlowForLookback(id),
+          bounds.endAbove
+        );
+        if (lookback !== null) {
+          selector.ts_start = {
+            ...(selector.ts_start as Record<string, string> | undefined),
+            $gte: lookback
+          };
+        }
       }
     }
 
@@ -131,10 +148,21 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
     // ts_start of the first segment of this page, so it is inclusive.
     if (page) {
       const cursorOp = reverse_order ? '$lte' : '$gte';
-      selector.ts_start = {
-        ...(selector.ts_start as Record<string, string> | undefined),
-        [cursorOp]: page
-      };
+      const current = selector.ts_start as Record<string, string> | undefined;
+      // Keep the tighter of the cursor and any existing bound on the same
+      // operator, so a cursor can neither widen the timerange nor the lookback.
+      const existing = current?.[cursorOp];
+      const tighter =
+        existing === undefined
+          ? page
+          : reverse_order
+            ? page < existing
+              ? page
+              : existing
+            : page > existing
+              ? page
+              : existing;
+      selector.ts_start = { ...current, [cursorOp]: tighter };
     }
 
     const max = limit ?? DEFAULT_LIMIT;
