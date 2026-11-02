@@ -16,6 +16,12 @@ const sourcesClient: DocumentScope<Static<typeof DBSource>> =
   client.use('sources');
 const segmentsClient: DocumentScope<Static<typeof DBSegment>> =
   client.use('segments');
+// Per-flow bookkeeping for segment queries (see api/utils/segmentLookback): one
+// small document per flow, keyed by flow id. A database of its own keeps these
+// documents out of every segment query, and unlike _local documents it has
+// real revision checking, which the conflict-retry in segmentLookback relies on.
+const segmentMetaClient: DocumentScope<{ max_ns: string }> =
+  client.use('segment_meta');
 const webhooksClient: DocumentScope<Static<typeof DBWebhook>> =
   client.use('webhooks');
 const deletionRequestsClient: DocumentScope<Static<typeof DBDeletionRequest>> =
@@ -80,6 +86,7 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
       await createDbIfMissing('flows');
       await createDbIfMissing('sources');
       await createDbIfMissing('segments');
+      await createDbIfMissing('segment_meta');
       await createDbIfMissing('webhooks');
       await createDbIfMissing('flow_delete_requests');
 
@@ -125,6 +132,7 @@ export {
   flowsClient,
   sourcesClient,
   segmentsClient,
+  segmentMetaClient,
   webhooksClient,
   deletionRequestsClient
 };
