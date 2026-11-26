@@ -6,6 +6,7 @@ import { DBSource } from './schemas/sources/Source';
 import { DBSegment } from './schemas/segments/Segments';
 import { DBWebhook } from './schemas/webhooks/Webhook';
 import { DBDeletionRequest } from './schemas/deletion-requests/DeletionRequest';
+import { SEGMENTS_TS_END_INDEX } from './indexes';
 
 const url = new URL(process.env.DB_URL || 'http://localhost:8000');
 url.username = process.env.DB_USERNAME || '';
@@ -87,6 +88,12 @@ export const initDatabases = async (retries = 5, delayMs = 2000) => {
         index: { fields: ['flow_id', 'ts_start'] },
         ddoc: SEGMENTS_INDEX.ddoc,
         name: SEGMENTS_INDEX.name,
+        type: 'json'
+      });
+      await segmentsClient.createIndex({
+        index: { fields: ['flow_id', 'ts_end'] },
+        ddoc: SEGMENTS_TS_END_INDEX.ddoc,
+        name: SEGMENTS_TS_END_INDEX.name,
         type: 'json'
       });
       await segmentsClient.createIndex({

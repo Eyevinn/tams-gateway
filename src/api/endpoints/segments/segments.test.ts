@@ -31,6 +31,35 @@ const mockClient = segmentsClient as unknown as {
   bulk: Mock;
 };
 
+// A timerange with a start makes two find calls: first a lookup of the first
+// segment that ends after the window start (it asks for `fields`), then the main
+// query. This answers both: `lookupTsStart` is the ts_start the lookup finds (null
+// when no segment ends after the window start) and `docs` are the main query rows.
+const mockWindowFind = (
+  opts: { lookupTsStart?: string | null; docs?: unknown[] } = {}
+) => {
+  const lookup =
+    opts.lookupTsStart === undefined
+      ? '00000000000000000000'
+      : opts.lookupTsStart;
+  mockClient.find.mockImplementation(async (q: { fields?: string[] }) =>
+    q.fields
+      ? { docs: lookup === null ? [] : [{ ts_start: lookup }] }
+      : { docs: opts.docs ?? [] }
+  );
+};
+type FindQuery = {
+  selector: Record<string, unknown>;
+  sort?: unknown;
+  limit?: number;
+  fields?: string[];
+  use_index?: string[];
+};
+const findCalls = () =>
+  mockClient.find.mock.calls.map((c) => c[0] as FindQuery);
+const lookupQuery = () => findCalls().find((q) => q.fields);
+const mainQuery = () => findCalls().find((q) => !q.fields) as FindQuery;
+
 // An _all_docs (list with keys) response. By default every requested id is
 // absent (a not_found error row with no value), so the handler inserts without
 // a _rev. Pass `existing` to supply a current rev for specific ids, optionally
@@ -265,7 +294,8 @@ describe('postSegments', () => {
 
 describe('listSegments', () => {
   it('queries by flow_id and overlap bounds and presigns get_urls', async () => {
-    mockClient.find.mockResolvedValue({
+    mockWindowFind({
+      lookupTsStart: '00000000004000000000',
       docs: [{ object_id: 'bucket/obj-1', timerange: '[0:0_10:0)' }]
     });
 
@@ -276,9 +306,13 @@ describe('listSegments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const selector = mockClient.find.mock.calls[0][0].selector;
+    const selector = mainQuery().selector;
     expect(selector.flow_id).toBe('flow-1');
-    expect(selector.ts_start).toEqual({ $lt: '00000000015000000000' });
+    // Upper bound from the window end, lower bound from the lookup.
+    expect(selector.ts_start).toEqual({
+      $lt: '00000000015000000000',
+      $gte: '00000000004000000000'
+    });
     expect(selector.ts_end).toEqual({ $gt: '00000000005000000000' });
 
     const body = res.json();
@@ -287,7 +321,7 @@ describe('listSegments', () => {
   });
 
   it('uses $lte on ts_start for an inclusive-end query', async () => {
-    mockClient.find.mockResolvedValue({ docs: [] });
+    mockWindowFind();
 
     const app = buildApp(listSegments);
     const res = await app.inject({
@@ -296,15 +330,18 @@ describe('listSegments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const selector = mockClient.find.mock.calls[0][0].selector;
+    const selector = mainQuery().selector;
     // Inclusive end => a segment beginning exactly at 15:0 must match.
-    expect(selector.ts_start).toEqual({ $lte: '00000000015000000000' });
+    expect(selector.ts_start).toEqual({
+      $lte: '00000000015000000000',
+      $gte: '00000000000000000000'
+    });
     expect(selector.ts_end).toEqual({ $gt: '00000000005000000000' });
     await app.close();
   });
 
   it('treats an instant query [t] as ts_start <= t and ts_end > t', async () => {
-    mockClient.find.mockResolvedValue({ docs: [] });
+    mockWindowFind();
 
     const app = buildApp(listSegments);
     const res = await app.inject({
@@ -313,15 +350,18 @@ describe('listSegments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const selector = mockClient.find.mock.calls[0][0].selector;
+    const selector = mainQuery().selector;
     // A segment starting exactly at 10:0 (ts_start == 10:0) must match.
-    expect(selector.ts_start).toEqual({ $lte: '00000000010000000000' });
+    expect(selector.ts_start).toEqual({
+      $lte: '00000000010000000000',
+      $gte: '00000000000000000000'
+    });
     expect(selector.ts_end).toEqual({ $gt: '00000000010000000000' });
     await app.close();
   });
 
   it('keeps $lt for an exclusive-end query (no regression)', async () => {
-    mockClient.find.mockResolvedValue({ docs: [] });
+    mockWindowFind();
 
     const app = buildApp(listSegments);
     const res = await app.inject({
@@ -330,14 +370,17 @@ describe('listSegments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const selector = mockClient.find.mock.calls[0][0].selector;
-    expect(selector.ts_start).toEqual({ $lt: '00000000015000000000' });
+    const selector = mainQuery().selector;
+    expect(selector.ts_start).toEqual({
+      $lt: '00000000015000000000',
+      $gte: '00000000000000000000'
+    });
     expect(selector.ts_end).toEqual({ $gt: '00000000005000000000' });
     await app.close();
   });
 
   it('omits the open side for half-open queries', async () => {
-    mockClient.find.mockResolvedValue({ docs: [] });
+    mockWindowFind({ lookupTsStart: '00000000010000000000' });
 
     const app = buildApp(listSegments);
     const resStart = await app.inject({
@@ -345,20 +388,23 @@ describe('listSegments', () => {
       url: '/flows/flow-1/segments?timerange=[10:0_'
     });
     expect(resStart.statusCode).toBe(200);
-    const openEnd = mockClient.find.mock.calls[0][0].selector;
-    expect(openEnd.ts_start).toBeUndefined();
+    const openEnd = mainQuery().selector;
+    // No end: no upper bound on ts_start, only the lower one the lookup found.
+    expect(openEnd.ts_start).toEqual({ $gte: '00000000010000000000' });
     expect(openEnd.ts_end).toEqual({ $gt: '00000000010000000000' });
 
     vi.clearAllMocks();
-    mockClient.find.mockResolvedValue({ docs: [] });
+    mockWindowFind();
     const resEnd = await app.inject({
       method: 'GET',
       url: '/flows/flow-1/segments?timerange=_15:0)'
     });
     expect(resEnd.statusCode).toBe(200);
-    const openStart = mockClient.find.mock.calls[0][0].selector;
+    const openStart = mainQuery().selector;
     expect(openStart.ts_start).toEqual({ $lt: '00000000015000000000' });
     expect(openStart.ts_end).toBeUndefined();
+    // No start: nothing to look up, a single query as before.
+    expect(mockClient.find).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
@@ -384,7 +430,7 @@ describe('listSegments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockClient.find.mock.calls[0][0].selector).toEqual({
+    expect(mainQuery().selector).toEqual({
       flow_id: 'flow-1'
     });
     await app.close();
@@ -498,7 +544,7 @@ describe('listSegments paging', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+    expect(mainQuery().selector.ts_start).toEqual({
       $gte: cursor
     });
     await app.close();
@@ -515,15 +561,16 @@ describe('listSegments paging', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+    expect(mainQuery().selector.ts_start).toEqual({
       $lte: cursor
     });
     await app.close();
   });
 
   it('merges the page cursor with an existing timerange bound on ts_start', async () => {
-    mockClient.find.mockResolvedValue({ docs: [] });
-    const cursor = '00000000000000000010';
+    // The window starts at 5 s; the first segment that ends after it starts at 4 s.
+    mockWindowFind({ lookupTsStart: tsKey(4) });
+    const cursor = tsKey(10);
 
     const app = buildApp(listSegments);
     const res = await app.inject({
@@ -532,10 +579,129 @@ describe('listSegments paging', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    // Upper bound from the timerange end plus the lower bound from the cursor.
-    expect(mockClient.find.mock.calls[0][0].selector.ts_start).toEqual({
+    // Upper bound from the timerange end, lower bound from the cursor: it is
+    // later than the lookup's, so it is the stricter one.
+    expect(mainQuery().selector.ts_start).toEqual({
       $lt: '00000000015000000000',
       $gte: cursor
+    });
+    await app.close();
+  });
+
+  it('keeps the lookup bound when a cursor falls before it', async () => {
+    mockWindowFind({ lookupTsStart: tsKey(4) });
+    const cursor = tsKey(1);
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?timerange=[5:0_15:0)&page=${cursor}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mainQuery().selector.ts_start).toEqual({
+      $lt: '00000000015000000000',
+      $gte: tsKey(4)
+    });
+    await app.close();
+  });
+
+  it('takes the descending cursor as an upper bound and keeps the lookup as the lower', async () => {
+    mockWindowFind({ lookupTsStart: tsKey(4) });
+    const cursor = tsKey(10);
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?timerange=[5:0_15:0)&reverse_order=true&page=${cursor}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mainQuery().selector.ts_start).toEqual({
+      $lt: '00000000015000000000',
+      $lte: cursor,
+      $gte: tsKey(4)
+    });
+    await app.close();
+  });
+});
+
+describe('listSegments window lookup', () => {
+  it('looks up the first segment that ends after the window start, on the ts_end index', async () => {
+    mockWindowFind({ lookupTsStart: '00000000004000000000' });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[5:0_15:0)'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(lookupQuery()).toEqual({
+      selector: { flow_id: 'flow-1', ts_end: { $gt: '00000000005000000000' } },
+      sort: [{ flow_id: 'asc' }, { ts_end: 'asc' }],
+      fields: ['ts_start'],
+      use_index: ['segments-ts-end-index', 'flow-ts-end'],
+      limit: 1
+    });
+    // The lookup runs first, then the main query reads only the window.
+    expect(findCalls()).toHaveLength(2);
+    expect(findCalls()[0]).toBe(lookupQuery());
+    expect(mainQuery().selector).toEqual({
+      flow_id: 'flow-1',
+      ts_start: { $lt: '00000000015000000000', $gte: '00000000004000000000' },
+      ts_end: { $gt: '00000000005000000000' }
+    });
+    await app.close();
+  });
+
+  it('returns an empty list without the main query when no segment ends after the start', async () => {
+    mockWindowFind({ lookupTsStart: null });
+
+    const app = buildApp(listSegments);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[500:0_510:0)'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+    expect(res.headers['x-paging-count']).toBe('0');
+    expect(res.headers['x-paging-nextkey']).toBeUndefined();
+    expect(findCalls()).toHaveLength(1);
+    await app.close();
+  });
+
+  it('does no lookup without a timerange or when the timerange has no start', async () => {
+    mockWindowFind();
+    const app = buildApp(listSegments);
+
+    await app.inject({ method: 'GET', url: '/flows/flow-1/segments' });
+    expect(findCalls()).toHaveLength(1);
+    expect(lookupQuery()).toBeUndefined();
+
+    vi.clearAllMocks();
+    mockWindowFind();
+    await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=_15:0)'
+    });
+    expect(findCalls()).toHaveLength(1);
+    expect(lookupQuery()).toBeUndefined();
+    await app.close();
+  });
+
+  it('applies the strict ts_end side to the lookup for an instant query', async () => {
+    mockWindowFind({ lookupTsStart: '00000000010000000000' });
+
+    const app = buildApp(listSegments);
+    await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[10:0]'
+    });
+
+    expect(lookupQuery()?.selector.ts_end).toEqual({
+      $gt: '00000000010000000000'
     });
     await app.close();
   });

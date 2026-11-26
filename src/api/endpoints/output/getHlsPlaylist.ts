@@ -4,7 +4,13 @@ import { MangoSelector } from 'nano';
 import { flowsClient, segmentsClient } from '../../../db/client';
 import ErrorResponse from '../../utils/error-response';
 import createS3URL from '../../utils/createS3URL';
+import { DBSegment } from '../../../db/schemas/segments/Segments';
 import { overlapBounds, toKey } from '../../utils/timerange';
+import {
+  findWindowStart,
+  withLowerTsStart,
+  WindowStart
+} from '../../utils/segmentWindow';
 import httpError from '../../utils/http-error';
 import { buildMediaPlaylist, HlsSegment } from '../../utils/hlsManifest';
 import {
@@ -177,8 +183,8 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     // (3) Build the same selector listSegments uses. An unparseable timerange is
     // a client error (400), parsed before any DB call.
     const selector: MangoSelector = { flow_id: id };
+    let bounds: ReturnType<typeof overlapBounds> | null = null;
     if (timerange) {
-      let bounds: ReturnType<typeof overlapBounds>;
       try {
         bounds = overlapBounds(timerange);
       } catch {
@@ -216,13 +222,28 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
         $gte: toKey(windowStartNs > 0n ? windowStartNs : 0n)
       };
     }
-    const result = await segmentsClient.find({
-      selector,
-      sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
-      // Live is bounded by the time window above; VOD/timerange span the whole
-      // recording so the player timeline is not truncated to the first ~33 min.
-      limit: limit ?? (liveLatest ? DEFAULT_LIMIT : VOD_MAX_SEGMENTS)
-    });
+    // A timerange window is bounded from below on ts_start too, so the query
+    // reads the window and not every older segment of the flow (see
+    // findWindowStart). A window no segment ends after holds nothing.
+    const windowStart: WindowStart =
+      bounds && timerange
+        ? await findWindowStart(id, bounds)
+        : { empty: false, lowerTsStart: null };
+    if (!windowStart.empty && windowStart.lowerTsStart !== null) {
+      selector.ts_start = withLowerTsStart(
+        selector.ts_start as Record<string, string> | undefined,
+        windowStart.lowerTsStart
+      );
+    }
+    const result = windowStart.empty
+      ? { docs: [] as Array<Static<typeof DBSegment>> }
+      : await segmentsClient.find({
+          selector,
+          sort: [{ flow_id: 'asc' }, { ts_start: 'asc' }],
+          // Live is bounded by the time window above; VOD/timerange span the whole
+          // recording so the player timeline is not truncated to the first ~33 min.
+          limit: limit ?? (liveLatest ? DEFAULT_LIMIT : VOD_MAX_SEGMENTS)
+        });
     const docs = result.docs;
 
     // (6) Media sequence. HLS only needs it stable per-segment and monotonic
