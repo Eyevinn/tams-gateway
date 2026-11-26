@@ -4,8 +4,14 @@ import { MangoSelector } from 'nano';
 import { segmentsClient } from '../../../db/client';
 import ErrorResponse from '../../utils/error-response';
 import Segment from '../../../db/schemas/segments/Segment';
+import { DBSegment } from '../../../db/schemas/segments/Segments';
 import createS3URL from '../../utils/createS3URL';
 import { overlapBounds, formatTimeRange } from '../../utils/timerange';
+import {
+  findWindowStart,
+  withLowerTsStart,
+  WindowStart
+} from '../../utils/segmentWindow';
 import httpError from '../../utils/http-error';
 
 const SegmentsArray = Type.Array(Segment);
@@ -100,6 +106,7 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
     const { timerange, limit, reverse_order, page } = request.query;
 
     const selector: MangoSelector = { flow_id: id };
+    let windowStart: WindowStart = { empty: false, lowerTsStart: null };
     if (timerange) {
       let bounds: ReturnType<typeof overlapBounds>;
       try {
@@ -118,6 +125,15 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
       if (bounds.endAbove !== null) {
         selector.ts_end = { [bounds.endOp]: bounds.endAbove };
       }
+      // Bound ts_start from below too, so the query reads the window and not
+      // every older segment of the flow. See findWindowStart.
+      windowStart = await findWindowStart(id, bounds);
+      if (!windowStart.empty && windowStart.lowerTsStart !== null) {
+        selector.ts_start = withLowerTsStart(
+          selector.ts_start as Record<string, string> | undefined,
+          windowStart.lowerTsStart
+        );
+      }
     }
 
     // CouchDB requires a uniform sort direction across all fields; both ascend
@@ -130,20 +146,22 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
     // descending pages move backward (ts_start <= cursor). The cursor is the
     // ts_start of the first segment of this page, so it is inclusive.
     if (page) {
-      const cursorOp = reverse_order ? '$lte' : '$gte';
-      selector.ts_start = {
-        ...(selector.ts_start as Record<string, string> | undefined),
-        [cursorOp]: page
-      };
+      const current = selector.ts_start as Record<string, string> | undefined;
+      selector.ts_start = reverse_order
+        ? { ...current, $lte: page }
+        : withLowerTsStart(current, page);
     }
 
     const max = limit ?? DEFAULT_LIMIT;
     // Fetch one extra row to detect a following page without a second query.
-    const result = await segmentsClient.find({
-      selector,
-      sort: [{ flow_id: dir }, { ts_start: dir }],
-      limit: max + 1
-    });
+    // A window that no segment ends after cannot hold any, so skip the query.
+    const result = windowStart.empty
+      ? { docs: [] as Array<Static<typeof DBSegment>> }
+      : await segmentsClient.find({
+          selector,
+          sort: [{ flow_id: dir }, { ts_start: dir }],
+          limit: max + 1
+        });
 
     const hasMore = result.docs.length > max;
     const pageDocs = hasMore ? result.docs.slice(0, max) : result.docs;

@@ -125,7 +125,8 @@ describe('getHlsPlaylist', () => {
     ];
     segments.find
       .mockResolvedValueOnce({ docs: [laterDocs[1]] }) // (1) recency probe
-      .mockResolvedValueOnce({ docs: laterDocs }); // (2) main window query
+      .mockResolvedValueOnce({ docs: [laterDocs[0]] }) // (2) first segment ending after the window start
+      .mockResolvedValueOnce({ docs: laterDocs }); // (3) main window query
 
     const app = buildApp();
     const res = await app.inject({
@@ -135,10 +136,58 @@ describe('getHlsPlaylist', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('#EXT-X-MEDIA-SEQUENCE:50');
-    // Only the recency probe + the main query; the O(flow length) count is gone.
-    expect(segments.find).toHaveBeenCalledTimes(2);
+    // The recency probe, the window-start lookup and the main query; the
+    // O(flow length) count is gone.
+    expect(segments.find).toHaveBeenCalledTimes(3);
     // VOD is briefly cacheable (capped below the presigned-URL TTL), not no-store.
     expect(res.headers['cache-control']).toContain('max-age=');
+    await app.close();
+  });
+
+  it('bounds a timerange query from below on ts_start with the window-start lookup', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    segments.find
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: [{ ts_start: ns(100) }] }) // (2) window-start lookup
+      .mockResolvedValueOnce({ docs: SEG_DOCS }); // (3) main window query
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B101%3A0_200%3A0%29'
+    });
+
+    expect(res.statusCode).toBe(200);
+    const lookup = segments.find.mock.calls[1][0];
+    expect(lookup.selector).toEqual({
+      flow_id: 'flow-1',
+      ts_end: { $gt: ns(101) }
+    });
+    expect(lookup.fields).toEqual(['ts_start']);
+    expect(lookup.limit).toBe(1);
+    expect(segments.find.mock.calls[2][0].selector).toEqual({
+      flow_id: 'flow-1',
+      ts_start: { $lt: ns(200), $gte: ns(100) },
+      ts_end: { $gt: ns(101) }
+    });
+    await app.close();
+  });
+
+  it('skips the main query when no segment ends after the window start', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    segments.find
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: [] }); // (2) window-start lookup: nothing ends after it
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B9000%3A0_9100%3A0%29'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('.ts');
+    expect(segments.find).toHaveBeenCalledTimes(2);
     await app.close();
   });
 
