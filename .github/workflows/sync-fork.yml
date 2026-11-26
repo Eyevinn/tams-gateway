@@ -17,13 +17,28 @@ jobs:
   sync-fork:
     name: Sync fork (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # --wait follows the rebuild of the catalog image, which takes a few minutes.
+    timeout-minutes: 15
+    concurrency:
+      group: sync-fork-${{ inputs.environment }}
+      cancel-in-progress: false
     steps:
-      - name: Install OSC CLI
-        run: npm install -g @osaas/cli
+      - name: Validate environment
+        run: |
+          case "${{ inputs.environment }}" in
+            prod|dev|stage) ;;
+            *) echo "Invalid environment: ${{ inputs.environment }}"; exit 1 ;;
+          esac
 
+      - name: Install OSC CLI
+        run: npm install -g @osaas/cli@4.35.0
+
+      # Sync by repository URL. The service id form (`admin sync-fork <serviceId>`) first
+      # looks the repository up in the service catalog, and that call rejects the sync-fork
+      # API key ("invalid authorization header") while the job still ends green. The URL
+      # form goes straight to the maker service, and --wait makes a failed sync fail the job.
       - name: Trigger sync fork
         env:
           OSC_ACCESS_TOKEN: unused
           OSC_API_KEY: ${{ secrets.OSC_API_KEY }}
-        run: osc --env ${{ inputs.environment }} admin sync-fork eyevinn-tams-gateway
+        run: osc --env "${{ inputs.environment }}" admin sync-fork --repository-url https://github.com/Eyevinn/tams-gateway --wait
