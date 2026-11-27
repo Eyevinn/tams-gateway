@@ -48,6 +48,9 @@ const mockWindowFind = (
       : { docs: opts.docs ?? [] }
   );
 };
+const tsKey = (sec: number) =>
+  (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
+
 type FindQuery = {
   selector: Record<string, unknown>;
   sort?: unknown;
@@ -486,9 +489,6 @@ describe('listSegments paging', () => {
       ts_end: endNs.toString().padStart(20, '0')
     };
   };
-  const tsKey = (sec: number) =>
-    (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
-
   it('always returns the paging headers', async () => {
     mockClient.find.mockResolvedValue({ docs: [docAt(0)] });
 
@@ -624,6 +624,57 @@ describe('listSegments paging', () => {
     });
     await app.close();
   });
+
+  // The lookup finds a segment starting at 4 s in each of these.
+  it.each([
+    ['ascending, at an exclusive end', `[5:0_15:0)&page=${tsKey(15)}`, 1],
+    ['ascending, past an exclusive end', `[5:0_15:0)&page=${tsKey(20)}`, 1],
+    ['ascending, past an inclusive end', `[5:0_15:0]&page=${tsKey(20)}`, 1],
+    ['ascending, past the end of an open start', `_15:0)&page=${tsKey(20)}`, 0],
+    [
+      'descending, before the first segment of the window',
+      `[5:0_15:0)&reverse_order=true&page=${tsKey(3)}`,
+      1
+    ]
+  ])(
+    'returns an empty page without the main query for a cursor %s',
+    async (_name, query, queries) => {
+      mockWindowFind({ lookupTsStart: tsKey(4) });
+
+      const app = buildApp(listSegments);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/flows/flow-1/segments?timerange=${query}`
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual([]);
+      expect(res.headers['x-paging-count']).toBe('0');
+      expect(res.headers['x-paging-nextkey']).toBeUndefined();
+      expect(findCalls()).toHaveLength(queries);
+      await app.close();
+    }
+  );
+
+  it.each([
+    ['at an inclusive end', `[5:0_15:0]&page=${tsKey(15)}`],
+    [
+      'at the first segment of the window, descending',
+      `[5:0_15:0)&reverse_order=true&page=${tsKey(4)}`
+    ],
+    ['that is not a number', '[5:0_15:0)&page=~']
+  ])('queries for a cursor %s', async (_name, query) => {
+    mockWindowFind({ lookupTsStart: tsKey(4) });
+
+    const app = buildApp(listSegments);
+    await app.inject({
+      method: 'GET',
+      url: `/flows/flow-1/segments?timerange=${query}`
+    });
+
+    expect(mainQuery()).toBeDefined();
+    await app.close();
+  });
 });
 
 describe('listSegments window lookup', () => {
@@ -669,6 +720,46 @@ describe('listSegments window lookup', () => {
     expect(res.headers['x-paging-count']).toBe('0');
     expect(res.headers['x-paging-nextkey']).toBeUndefined();
     expect(findCalls()).toHaveLength(1);
+    await app.close();
+  });
+
+  it.each([
+    ['starts after an exclusive end', '[5:0_15:0)', 20],
+    ['starts at an exclusive end', '[5:0_15:0)', 15],
+    ['starts after an inclusive end', '[5:0_15:0]', 20],
+    ['starts after an instant', '[10:0]', 12]
+  ])(
+    'returns an empty list without the main query when the first segment %s',
+    async (_name, timerange, startSec) => {
+      mockWindowFind({ lookupTsStart: tsKey(startSec) });
+
+      const app = buildApp(listSegments);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/flows/flow-1/segments?timerange=${timerange}`
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual([]);
+      expect(res.headers['x-paging-count']).toBe('0');
+      expect(findCalls()).toHaveLength(1);
+      await app.close();
+    }
+  );
+
+  it('queries a segment that starts at an inclusive end', async () => {
+    mockWindowFind({ lookupTsStart: tsKey(15) });
+
+    const app = buildApp(listSegments);
+    await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[5:0_15:0]'
+    });
+
+    expect(mainQuery().selector.ts_start).toEqual({
+      $lte: tsKey(15),
+      $gte: tsKey(15)
+    });
     await app.close();
   });
 

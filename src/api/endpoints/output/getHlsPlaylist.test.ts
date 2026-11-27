@@ -191,6 +191,24 @@ describe('getHlsPlaylist', () => {
     await app.close();
   });
 
+  it('skips the main query when the first segment starts after the window', async () => {
+    flows.get.mockResolvedValue(MPEG_TS_FLOW);
+    segments.find
+      .mockResolvedValueOnce({ docs: [SEG_DOCS[1]] }) // (1) recency probe
+      .mockResolvedValueOnce({ docs: [{ ts_start: ns(300) }] }); // (2) window-start lookup
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/output.m3u8?type=vod&timerange=%5B101%3A0_200%3A0%29'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('.ts');
+    expect(segments.find).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
   // A recent (≈ now) ts_end, so the flow reads as actively producing.
   const recentTsEnd = ns(Math.floor(Date.now() / 1000));
 

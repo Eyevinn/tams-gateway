@@ -9,6 +9,7 @@ import createS3URL from '../../utils/createS3URL';
 import { overlapBounds, formatTimeRange } from '../../utils/timerange';
 import {
   findWindowStart,
+  isEmptyRange,
   withLowerTsStart,
   WindowStart
 } from '../../utils/segmentWindow';
@@ -154,8 +155,12 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
 
     const max = limit ?? DEFAULT_LIMIT;
     // Fetch one extra row to detect a following page without a second query.
-    // A window that no segment ends after cannot hold any, so skip the query.
-    const result = windowStart.empty
+    // Neither an empty window nor a ts_start range that matches nothing (a
+    // cursor outside the window's segments) is queried. See isEmptyRange.
+    const empty =
+      windowStart.empty ||
+      isEmptyRange(selector.ts_start as Record<string, string> | undefined);
+    const result = empty
       ? { docs: [] as Array<Static<typeof DBSegment>> }
       : await segmentsClient.find({
           selector,

@@ -4,10 +4,11 @@ import { OverlapBounds } from './timerange';
 
 // Where the segments overlapping a timerange begin in a flow.
 //
-// `empty` means no segment of the flow ends after the window start, so nothing
-// can overlap and the main query can be skipped. Otherwise `lowerTsStart` is
-// the smallest ts_start that can belong to an overlapping segment, or null when
-// the window has no start (an open or eternity start needs no lower bound).
+// `empty` means no segment of the flow can overlap the window (none ends after
+// its start, or the first that does starts after its end), so the main query can
+// be skipped. Otherwise `lowerTsStart` is the smallest ts_start that can belong
+// to an overlapping segment, or null when the window has no start (an open or
+// eternity start needs no lower bound).
 export type WindowStart =
   | { empty: true }
   | { empty: false; lowerTsStart: string | null };
@@ -44,9 +45,34 @@ export const findWindowStart = async (
     limit: 1
   });
   const tsStart = first.docs[0]?.ts_start;
-  return tsStart === undefined
+  if (tsStart === undefined) {
+    return { empty: true };
+  }
+  const { startBelow, startOp } = bounds;
+  const startsAfterWindow =
+    startBelow !== null &&
+    isEmptyRange({ $gte: tsStart, [startOp]: startBelow });
+  return startsAfterWindow
     ? { empty: true }
     : { empty: false, lowerTsStart: tsStart };
+};
+
+// Whether a ts_start condition can match nothing because its lower bound is past
+// an upper one. Such a condition must not reach CouchDB, which then drops the
+// index range, including flow_id, and reads every segment in the database.
+//
+// A page cursor is client input. One that is not a number is left to CouchDB,
+// whose string order differs from JavaScript's.
+export const isEmptyRange = (
+  tsStart: Record<string, string> | undefined
+): boolean => {
+  const { $gte, $lt, $lte } = tsStart ?? {};
+  if ($gte === undefined || !/^\d+$/.test($gte)) {
+    return false;
+  }
+  return (
+    ($lt !== undefined && $gte >= $lt) || ($lte !== undefined && $gte > $lte)
+  );
 };
 
 // Merge a lower bound on ts_start into the selector's existing ts_start
