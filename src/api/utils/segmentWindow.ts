@@ -45,20 +45,35 @@ export const findWindowStart = async (
     limit: 1
   });
   const tsStart = first.docs[0]?.ts_start;
-  // The main query for a segment that starts after the window would put the
-  // lower bound on ts_start above the upper one. CouchDB then drops the index
-  // range, including flow_id, and reads every segment in the database.
-  return tsStart === undefined || startsAfterWindow(tsStart, bounds)
+  if (tsStart === undefined) {
+    return { empty: true };
+  }
+  const { startBelow, startOp } = bounds;
+  const startsAfterWindow =
+    startBelow !== null &&
+    isEmptyRange({ $gte: tsStart, [startOp]: startBelow });
+  return startsAfterWindow
     ? { empty: true }
     : { empty: false, lowerTsStart: tsStart };
 };
 
-const startsAfterWindow = (
-  tsStart: string,
-  { startBelow, startOp }: OverlapBounds
-): boolean =>
-  startBelow !== null &&
-  (tsStart > startBelow || (tsStart === startBelow && startOp === '$lt'));
+// Whether a ts_start condition can match nothing because its lower bound is past
+// an upper one. Such a condition must not reach CouchDB, which then drops the
+// index range, including flow_id, and reads every segment in the database.
+//
+// A page cursor is client input. One that is not a number is left to CouchDB,
+// whose string order differs from JavaScript's.
+export const isEmptyRange = (
+  tsStart: Record<string, string> | undefined
+): boolean => {
+  const { $gte, $lt, $lte } = tsStart ?? {};
+  if ($gte === undefined || !/^\d+$/.test($gte)) {
+    return false;
+  }
+  return (
+    ($lt !== undefined && $gte >= $lt) || ($lte !== undefined && $gte > $lte)
+  );
+};
 
 // Merge a lower bound on ts_start into the selector's existing ts_start
 // condition, keeping the stricter of it and any bound already set (the paging
