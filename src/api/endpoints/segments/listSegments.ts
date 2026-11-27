@@ -154,7 +154,7 @@ const listSegments: FastifyPluginCallback = (fastify, _, next) => {
 
     const max = limit ?? DEFAULT_LIMIT;
     // Fetch one extra row to detect a following page without a second query.
-    // A window that no segment ends after cannot hold any, so skip the query.
+    // An empty window needs no query. See findWindowStart.
     const result = windowStart.empty
       ? { docs: [] as Array<Static<typeof DBSegment>> }
       : await segmentsClient.find({

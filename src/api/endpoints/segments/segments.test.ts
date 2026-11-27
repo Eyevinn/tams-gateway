@@ -48,6 +48,9 @@ const mockWindowFind = (
       : { docs: opts.docs ?? [] }
   );
 };
+const tsKey = (sec: number) =>
+  (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
+
 type FindQuery = {
   selector: Record<string, unknown>;
   sort?: unknown;
@@ -486,9 +489,6 @@ describe('listSegments paging', () => {
       ts_end: endNs.toString().padStart(20, '0')
     };
   };
-  const tsKey = (sec: number) =>
-    (BigInt(sec) * 1_000_000_000n).toString().padStart(20, '0');
-
   it('always returns the paging headers', async () => {
     mockClient.find.mockResolvedValue({ docs: [docAt(0)] });
 
@@ -669,6 +669,46 @@ describe('listSegments window lookup', () => {
     expect(res.headers['x-paging-count']).toBe('0');
     expect(res.headers['x-paging-nextkey']).toBeUndefined();
     expect(findCalls()).toHaveLength(1);
+    await app.close();
+  });
+
+  it.each([
+    ['starts after an exclusive end', '[5:0_15:0)', 20],
+    ['starts at an exclusive end', '[5:0_15:0)', 15],
+    ['starts after an inclusive end', '[5:0_15:0]', 20],
+    ['starts after an instant', '[10:0]', 12]
+  ])(
+    'returns an empty list without the main query when the first segment %s',
+    async (_name, timerange, startSec) => {
+      mockWindowFind({ lookupTsStart: tsKey(startSec) });
+
+      const app = buildApp(listSegments);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/flows/flow-1/segments?timerange=${timerange}`
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual([]);
+      expect(res.headers['x-paging-count']).toBe('0');
+      expect(findCalls()).toHaveLength(1);
+      await app.close();
+    }
+  );
+
+  it('queries a segment that starts at an inclusive end', async () => {
+    mockWindowFind({ lookupTsStart: tsKey(15) });
+
+    const app = buildApp(listSegments);
+    await app.inject({
+      method: 'GET',
+      url: '/flows/flow-1/segments?timerange=[5:0_15:0]'
+    });
+
+    expect(mainQuery().selector.ts_start).toEqual({
+      $lte: tsKey(15),
+      $gte: tsKey(15)
+    });
     await app.close();
   });
 

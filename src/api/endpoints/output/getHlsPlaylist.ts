@@ -224,7 +224,7 @@ const getHlsPlaylist: FastifyPluginCallback = (fastify, _, next) => {
     }
     // A timerange window is bounded from below on ts_start too, so the query
     // reads the window and not every older segment of the flow (see
-    // findWindowStart). A window no segment ends after holds nothing.
+    // findWindowStart), and an empty window is not queried at all.
     const windowStart: WindowStart =
       bounds && timerange
         ? await findWindowStart(id, bounds)

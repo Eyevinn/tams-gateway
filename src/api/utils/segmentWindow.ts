@@ -4,10 +4,11 @@ import { OverlapBounds } from './timerange';
 
 // Where the segments overlapping a timerange begin in a flow.
 //
-// `empty` means no segment of the flow ends after the window start, so nothing
-// can overlap and the main query can be skipped. Otherwise `lowerTsStart` is
-// the smallest ts_start that can belong to an overlapping segment, or null when
-// the window has no start (an open or eternity start needs no lower bound).
+// `empty` means no segment of the flow can overlap the window (none ends after
+// its start, or the first that does starts after its end), so the main query can
+// be skipped. Otherwise `lowerTsStart` is the smallest ts_start that can belong
+// to an overlapping segment, or null when the window has no start (an open or
+// eternity start needs no lower bound).
 export type WindowStart =
   | { empty: true }
   | { empty: false; lowerTsStart: string | null };
@@ -44,10 +45,20 @@ export const findWindowStart = async (
     limit: 1
   });
   const tsStart = first.docs[0]?.ts_start;
-  return tsStart === undefined
+  // The main query for a segment that starts after the window would put the
+  // lower bound on ts_start above the upper one. CouchDB then drops the index
+  // range, including flow_id, and reads every segment in the database.
+  return tsStart === undefined || startsAfterWindow(tsStart, bounds)
     ? { empty: true }
     : { empty: false, lowerTsStart: tsStart };
 };
+
+const startsAfterWindow = (
+  tsStart: string,
+  { startBelow, startOp }: OverlapBounds
+): boolean =>
+  startBelow !== null &&
+  (tsStart > startBelow || (tsStart === startBelow && startOp === '$lt'));
 
 // Merge a lower bound on ts_start into the selector's existing ts_start
 // condition, keeping the stricter of it and any bound already set (the paging
